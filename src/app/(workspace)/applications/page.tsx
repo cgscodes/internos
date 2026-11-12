@@ -5,9 +5,10 @@ import { useWorkspace } from "@/components/workspace-provider";
 import { Application, statuses } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { ApplicationDialog } from "@/components/application-dialog";
+import { applicationDraft } from "@/lib/business/tracking";
 import { CompanyMark, Empty, Status, dateLabel } from "@/components/shared";
 export default function Applications() {
-  const { data } = useWorkspace();
+  const { data, busy, setStatus: updateStatus } = useWorkspace();
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("All statuses"),
     [editing, setEditing] = useState<Application | null | undefined>();
@@ -70,22 +71,7 @@ export default function Applications() {
                 <button
                   className="icon-button"
                   aria-label={`Add application in ${s}`}
-                  onClick={() =>
-                    setEditing({
-                      id: crypto.randomUUID(),
-                      company: "",
-                      title: "",
-                      location: "",
-                      type: "Internship",
-                      source: "Manual entry",
-                      url: "",
-                      deadline: "",
-                      notes: "",
-                      important_date: "",
-                      created_at: new Date().toISOString(),
-                      status: s,
-                    })
-                  }
+                  onClick={() => setEditing(applicationDraft(s))}
                 >
                   <Plus size={16} />
                 </button>
@@ -93,26 +79,46 @@ export default function Applications() {
               {apps
                 .filter((a) => a.status === s)
                 .map((a) => (
-                  <button
-                    key={a.id}
-                    className="application-card"
-                    onClick={() => setEditing(a)}
-                  >
-                    <div className="row">
-                      <CompanyMark name={a.company} />
-                      <strong>{a.company}</strong>
-                    </div>
-                    <h3>{a.title}</h3>
-                    <p>{a.location || "Location not specified"}</p>
-                    <div className="application-card-footer">
-                      <span>
-                        {a.deadline
-                          ? `Due ${dateLabel(a.deadline)}`
-                          : "No deadline"}
-                      </span>
-                      <span>↗</span>
-                    </div>
-                  </button>
+                  <article key={a.id} className="application-card">
+                    <button
+                      className="application-card-open"
+                      onClick={() => setEditing(a)}
+                      aria-label={`${a.company} ${a.title}`}
+                    >
+                      <div className="row">
+                        <CompanyMark name={a.company} />
+                        <strong>{a.company}</strong>
+                      </div>
+                      <h3>{a.title}</h3>
+                      <p>{a.location || "Location not specified"}</p>
+                      <div className="application-card-footer">
+                        <span>
+                          {a.deadline
+                            ? `Due ${dateLabel(a.deadline)}`
+                            : "No deadline"}
+                        </span>
+                        <span>↗</span>
+                      </div>
+                    </button>
+                    <label className="pipeline-status">
+                      Status
+                      <select
+                        aria-label={`Status for ${a.title} at ${a.company}`}
+                        value={a.status}
+                        disabled={busy}
+                        onChange={(event) => {
+                          void updateStatus(
+                            a.id,
+                            event.target.value as Application["status"],
+                          ).catch(() => {});
+                        }}
+                      >
+                        {statuses.map((status) => (
+                          <option key={status}>{status}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </article>
                 ))}
               {!apps.some((a) => a.status === s) && (
                 <div className="column-empty">No applications yet</div>

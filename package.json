@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:e2e": "playwright test",
-    "format": "prettier --write src tests *.ts *.json README.md"
+    "format": "prettier --write src tests *.ts *.json README.md",
+    "test:live": "node scripts/verify-persistence.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.3.1",

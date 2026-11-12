@@ -1,40 +1,27 @@
-import { z } from "zod";
-export const statuses = [
-  "Saved",
-  "Preparing",
-  "Ready",
-  "Applied",
-  "Assessment",
-  "Interview",
-  "Offer",
-  "Rejected",
-  "Withdrawn",
-] as const;
-export const applicationSchema = z.object({
-  id: z.uuid(),
-  company: z.string().trim().min(1).max(120),
-  title: z.string().trim().min(1).max(160),
-  location: z.string().max(160),
-  type: z.enum(["Internship", "Co-op", "Graduate"]),
-  source: z.string().max(120),
-  url: z.union([
-    z.literal(""),
-    z.url().refine((v) => /^https?:\/\//.test(v), "Use an http or https link"),
-  ]),
-  deadline: z.union([z.literal(""), z.iso.date()]),
-  status: z.enum(statuses),
-  notes: z.string().max(10000),
-  important_date: z.union([z.literal(""), z.iso.date()]),
-  created_at: z.iso.datetime({ offset: true }),
-});
+import type { z } from "zod";
+import {
+  applicationSchema,
+  jobSchema,
+  profileSchema,
+} from "./validation/tracking.ts";
+export {
+  applicationSchema,
+  jobSchema,
+  profileSchema,
+  statuses,
+} from "./validation/tracking.ts";
 export type Application = z.infer<typeof applicationSchema>;
-export const profileSchema = z.object({
-  full_name: z.string().trim().min(1).max(100),
-  education: z.string().max(500),
-  skills: z.string().max(1000),
-  interests: z.string().max(500),
-  locations: z.string().max(500),
-});
+export type Job = z.infer<typeof jobSchema> & {
+  created_by: string | null;
+  created_at: string;
+};
+export type Company = {
+  id: string;
+  name: string;
+  website: string | null;
+  created_by: string | null;
+  created_at: string;
+};
 export type Profile = z.infer<typeof profileSchema>;
 export type Resume = {
   id: string;
@@ -51,12 +38,17 @@ export type Activity = {
   application_id: string;
   description: string;
   created_at: string;
+  from_status?: Application["status"] | null;
+  to_status?: Application["status"] | null;
 };
 export type Workspace = {
   applications: Application[];
-  jobs: Application[];
+  jobs: Job[];
+  companies: Company[];
+  bookmarks: string[];
   resumes: Resume[];
   events: Activity[];
   profile: Profile;
   email?: string;
+  identity?: { id: string; full_name: string; avatar_url: string | null };
 };

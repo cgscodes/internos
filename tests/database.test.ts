@@ -1,30 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { createTestDatabase } from "./helpers/database.mjs";
 
 test("migration, RLS isolation, composite ownership, and activity/version triggers", async () => {
-  const db = new PGlite();
+  const db = await createTestDatabase();
   try {
-    await db.exec(`create role authenticated; create schema auth; create schema storage;
- create table auth.users(id uuid primary key, raw_user_meta_data jsonb not null default '{}');
- create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
- create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
- create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);
- alter table storage.objects enable row level security;
- create function storage.foldername(name text) returns text[] language sql immutable as $$ select string_to_array(name,'/') $$;`);
-    await db.exec(
-      await readFile(
-        new URL(
-          "../supabase/migrations/202611110001_initial.sql",
-          import.meta.url,
-        ),
-        "utf8",
-      ),
-    );
-    await db.exec(
-      `grant usage on schema public,auth,storage to authenticated; grant select,insert,update,delete on all tables in schema public,storage to authenticated;`,
-    );
     const alice = "00000000-0000-4000-8000-000000000001",
       bob = "00000000-0000-4000-8000-000000000002",
       app = "00000000-0000-4000-8000-000000000003",

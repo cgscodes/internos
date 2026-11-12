@@ -4,7 +4,7 @@ import {
   Bookmark,
   BriefcaseBusiness,
 } from "lucide-react";
-import { Application } from "@/lib/models";
+import { Job } from "@/lib/models";
 import { Button } from "./ui/button";
 export function CompanyMark({ name }: { name: string }) {
   const marks: Record<string, string> = {
@@ -53,11 +53,13 @@ export function JobCard({
   saved,
   onSave,
   onDetails,
+  busy = false,
 }: {
-  job: Application;
+  job: Job;
   saved: boolean;
   onSave: () => void;
   onDetails: () => void;
+  busy?: boolean;
 }) {
   return (
     <article className="job-card">
@@ -72,9 +74,9 @@ export function JobCard({
         <button
           className={`icon-button ${saved ? "is-saved" : ""}`}
           onClick={onSave}
-          disabled={saved}
+          disabled={busy}
           aria-label={
-            saved ? "Opportunity saved" : `Save ${job.title} at ${job.company}`
+            saved ? "Remove bookmark" : `Save ${job.title} at ${job.company}`
           }
         >
           <Bookmark size={19} fill={saved ? "currentColor" : "none"} />

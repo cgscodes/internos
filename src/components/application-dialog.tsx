@@ -1,10 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Application, applicationSchema, statuses } from "@/lib/models";
+import { applicationDraft } from "@/lib/business/tracking";
 import { useWorkspace } from "./workspace-provider";
 import { Modal } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { ExternalLink, Trash2 } from "lucide-react";
+import { dateLabel } from "./shared";
 export function ApplicationDialog({
   application,
   onClose,
@@ -12,39 +14,50 @@ export function ApplicationDialog({
   application: Application | null | undefined;
   onClose: () => void;
 }) {
-  const { save, remove, busy } = useWorkspace();
+  const { data, save, remove, busy } = useWorkspace();
+  const companyList = useId();
   const [error, setError] = useState(""),
     [confirm, setConfirm] = useState(false);
   const app = application;
+  const existing = !!app && data.applications.some((a) => a.id === app.id);
+  const history = data.events.filter(
+    (event) => event.application_id === app?.id,
+  );
   return (
     <Modal
       open={application !== undefined}
-      onOpenChange={(o) => {
-        if (!o) onClose();
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
       }}
-      title={app ? `${app.company} · Application` : "Track an application"}
+      title={existing ? `${app.company} · Application` : "Track an application"}
       description="Keep the opportunity, notes, and next steps in one place."
     >
       <form
         className="form-grid"
-        onSubmit={async (e) => {
-          e.preventDefault();
+        onSubmit={async (event) => {
+          event.preventDefault();
           setError("");
-          const fields = Object.fromEntries(new FormData(e.currentTarget));
-          const result = applicationSchema.safeParse({
+          const fields = Object.fromEntries(new FormData(event.currentTarget));
+          const company = data.companies.find(
+            (company) =>
+              company.name.toLowerCase() ===
+              String(fields.company).trim().toLowerCase(),
+          );
+          const parsed = applicationSchema.safeParse({
+            ...applicationDraft(),
+            ...app,
             ...fields,
-            id: app?.id || crypto.randomUUID(),
-            created_at: app?.created_at || new Date().toISOString(),
+            company_id: company?.id || null,
           });
-          if (!result.success) {
-            setError(result.error.issues[0].message);
+          if (!parsed.success) {
+            setError(parsed.error.issues[0].message);
             return;
           }
           try {
-            await save(result.data);
+            await save(parsed.data);
             onClose();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Unable to save");
+          } catch (error) {
+            setError(error instanceof Error ? error.message : "Unable to save");
           }
         }}
       >
@@ -54,9 +67,15 @@ export function ApplicationDialog({
             name="company"
             required
             maxLength={120}
+            list={companyList}
             defaultValue={app?.company}
-            placeholder="e.g. Linear"
+            placeholder="Select a company or enter a new name"
           />
+          <datalist id={companyList}>
+            {data.companies.map((company) => (
+              <option key={company.id} value={company.name} />
+            ))}
+          </datalist>
         </label>
         <label>
           Role
@@ -72,6 +91,7 @@ export function ApplicationDialog({
           Location
           <input
             name="location"
+            maxLength={160}
             defaultValue={app?.location || ""}
             placeholder="City or remote"
           />
@@ -79,8 +99,8 @@ export function ApplicationDialog({
         <label>
           Status
           <select name="status" defaultValue={app?.status || "Saved"}>
-            {statuses.map((s) => (
-              <option key={s}>{s}</option>
+            {statuses.map((status) => (
+              <option key={status}>{status}</option>
             ))}
           </select>
         </label>
@@ -94,7 +114,11 @@ export function ApplicationDialog({
         </label>
         <label>
           Source
-          <input name="source" defaultValue={app?.source || "Manual entry"} />
+          <input
+            name="source"
+            maxLength={120}
+            defaultValue={app?.source || "Manual entry"}
+          />
         </label>
         <label>
           Application deadline
@@ -105,6 +129,17 @@ export function ApplicationDialog({
           />
         </label>
         <label>
+          Date applied
+          <input
+            type="date"
+            name="applied_on"
+            defaultValue={app?.applied_on || ""}
+          />
+          <small>
+            Defaults to today when first moving to a submitted stage.
+          </small>
+        </label>
+        <label className="full-width">
           Next important date
           <input
             type="date"
@@ -122,9 +157,20 @@ export function ApplicationDialog({
           />
         </label>
         <label className="full-width">
+          Job description
+          <textarea
+            name="description"
+            maxLength={20000}
+            rows={3}
+            defaultValue={app?.description || ""}
+            placeholder="Responsibilities, requirements, and role details"
+          />
+        </label>
+        <label className="full-width">
           Notes
           <textarea
             name="notes"
+            maxLength={10000}
             rows={4}
             defaultValue={app?.notes || ""}
             placeholder="Contacts, preparation notes, and things to remember…"
@@ -136,10 +182,11 @@ export function ApplicationDialog({
           </p>
         )}
         <div className="form-actions full-width">
-          {app && (
+          {existing && (
             <Button
               type="button"
               variant="ghost"
+              disabled={busy}
               onClick={() => setConfirm(true)}
             >
               <Trash2 size={16} />
@@ -159,13 +206,41 @@ export function ApplicationDialog({
           </Button>
         </div>
       </form>
+      {existing && (
+        <section className="application-history">
+          <h3>
+            Application history
+            {app.attempt > 1 ? ` · Attempt ${app.attempt}` : ""}
+          </h3>
+          {history.length ? (
+            history.map((event) => (
+              <div className="history-row" key={event.id}>
+                <span>{event.description}</span>
+                <time dateTime={event.created_at}>
+                  {dateLabel(event.created_at)}
+                </time>
+              </div>
+            ))
+          ) : (
+            <p>No recorded updates yet.</p>
+          )}
+        </section>
+      )}
       {confirm && (
-        <div className="confirm-box" role="alert">
-          <p>
-            Delete this application and its activity? This cannot be undone.
-          </p>
-          <div className="row">
-            <Button variant="outline" onClick={() => setConfirm(false)}>
+        <Modal
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) setConfirm(false);
+          }}
+          title="Delete this application?"
+          description="This permanently deletes the application and its activity history."
+        >
+          <div className="form-actions">
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => setConfirm(false)}
+            >
               Keep application
             </Button>
             <Button
@@ -175,15 +250,18 @@ export function ApplicationDialog({
                 try {
                   await remove(app!.id);
                   onClose();
-                } catch {
-                  setError("Unable to delete. Please try again.");
+                } catch (error) {
+                  setError(
+                    error instanceof Error ? error.message : "Unable to delete",
+                  );
+                  setConfirm(false);
                 }
               }}
             >
               Delete application
             </Button>
           </div>
-        </div>
+        </Modal>
       )}
     </Modal>
   );

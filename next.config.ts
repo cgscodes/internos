@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   devIndicators: false,
+  logging: { incomingRequests: { ignore: [/\/auth\//] } },
   async headers() {
     return [
       {

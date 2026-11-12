@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 test("tracks, updates, persists, filters, and deletes an application", async ({
   page,
 }) => {
@@ -81,13 +81,14 @@ test("discovers, saves, edits profile, and keeps pages within the viewport", asy
           exact: true,
         }),
       })
-      .getByRole("button", { name: "Opportunity saved" }),
-  ).toBeDisabled();
+      .getByRole("button", { name: "Remove bookmark" }),
+  ).toBeEnabled();
   await page.goto("/settings");
   await page
     .getByRole("textbox", { name: "Full name", exact: true })
     .fill("Jamie Test");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.locator(".toast")).toHaveText("Changes saved");
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Keep moving forward, Jamie." }),
@@ -110,7 +111,7 @@ test("discovers, saves, edits profile, and keeps pages within the viewport", asy
   await page.goto("/resumes");
   await expect(
     page.getByRole("button", { name: "Upload resume" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
 });
 
 test("manually adds an opportunity and supports keyboard dialog dismissal", async ({
@@ -120,9 +121,7 @@ test("manually adds an opportunity and supports keyboard dialog dismissal", asyn
   await page
     .getByRole("button", { name: "Add opportunity", exact: true })
     .click();
-  await page
-    .getByRole("textbox", { name: "Company", exact: true })
-    .fill("Independent Studio");
+  await page.getByLabel("Company", { exact: true }).fill("Independent Studio");
   await page
     .getByRole("textbox", { name: "Role", exact: true })
     .fill("Design Intern");
@@ -130,7 +129,7 @@ test("manually adds an opportunity and supports keyboard dialog dismissal", asyn
     .getByRole("textbox", { name: "Source", exact: true })
     .fill("University board");
   await page
-    .getByRole("button", { name: "Save application", exact: true })
+    .getByRole("button", { name: "Save opportunity", exact: true })
     .click();
   await page
     .getByRole("textbox", { name: "Search opportunities" })

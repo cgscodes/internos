@@ -1,63 +1,52 @@
-import { authorized } from "@/lib/supabase/server";
-import { applicationSchema, profileSchema } from "@/lib/models";
+import { isSameOrigin } from "@/lib/auth/origin";
 import { getWorkspace } from "@/lib/services/workspace";
+import { mutateWorkspace } from "@/lib/services/tracking";
+import { mutationSchema } from "@/lib/validation/tracking";
+import { TrackingError } from "@/lib/services/errors";
 import { z } from "zod";
+function failure(error: unknown) {
+  const status =
+    error instanceof TrackingError
+      ? error.status
+      : error instanceof Error && error.message === "Unauthorized"
+        ? 401
+        : error instanceof z.ZodError || error instanceof SyntaxError
+          ? 400
+          : 500;
+  const message =
+    error instanceof TrackingError
+      ? error.message
+      : status === 401
+        ? "Your session has expired. Please sign in again."
+        : error instanceof z.ZodError
+          ? error.issues[0].message
+          : status === 400
+            ? "Invalid request."
+            : "Unable to refresh the workspace. If you just saved a change, reload before trying again.";
+  return Response.json(
+    { error: message },
+    { status, headers: { "Cache-Control": "private, no-store" } },
+  );
+}
 export async function GET() {
   try {
     return Response.json(await getWorkspace(), {
       headers: { "Cache-Control": "private, no-store" },
     });
-  } catch (e) {
-    return Response.json(
-      { error: e instanceof Error ? e.message : "Unable to load workspace" },
-      {
-        status: e instanceof Error && e.message === "Unauthorized" ? 401 : 500,
-      },
-    );
+  } catch (error) {
+    return failure(error);
   }
 }
 export async function POST(request: Request) {
+  if (!isSameOrigin(request))
+    return Response.json({ error: "Invalid origin" }, { status: 403 });
   try {
-    if (request.headers.get("origin") !== new URL(request.url).origin)
-      return Response.json({ error: "Invalid origin" }, { status: 403 });
-    const { client, user } = await authorized();
-    const body = await request.json();
-    if (body.action === "profile") {
-      const profile = profileSchema.parse(body.data);
-      const { error } = await client
-        .from("profiles")
-        .update(profile)
-        .eq("id", user.id);
-      if (error) throw error;
-    } else if (body.action === "delete") {
-      const id = z.uuid().parse(body.id);
-      const { error } = await client
-        .from("applications")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", user.id);
-      if (error) throw error;
-    } else if (body.action === "application") {
-      const data = applicationSchema.parse(body.data);
-      const { error } = await client
-        .from("applications")
-        .upsert({ ...data, user_id: user.id }, { onConflict: "id" });
-      if (error) throw error;
-    } else return Response.json({ error: "Unknown action" }, { status: 400 });
-    return Response.json(await getWorkspace());
-  } catch (e) {
-    return Response.json(
-      {
-        error:
-          e instanceof z.ZodError
-            ? e.issues[0].message
-            : e instanceof Error
-              ? e.message
-              : "Unable to save changes",
-      },
-      {
-        status: e instanceof Error && e.message === "Unauthorized" ? 401 : 400,
-      },
-    );
+    const mutation = mutationSchema.parse(await request.json());
+    await mutateWorkspace(mutation);
+    return Response.json(await getWorkspace(), {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch (error) {
+    return failure(error);
   }
 }

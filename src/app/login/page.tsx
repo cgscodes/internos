@@ -1,13 +1,28 @@
-import Link from "next/link";
-import { BriefcaseBusiness, ArrowRight, ShieldCheck } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { configured } from "@/lib/supabase/server";
+import { BriefcaseBusiness, ShieldCheck } from "lucide-react";
+import { redirect } from "next/navigation";
+import { configured, getVerifiedUser } from "@/lib/supabase/server";
+import { safeNext } from "@/lib/auth/redirects";
+import { SignedOutNotice } from "@/components/auth/signed-out-notice";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+const messages: Record<string, string> = {
+  oauth_failed:
+    "Google sign-in was cancelled or could not be completed. Please try again.",
+  session_expired: "Your session has expired. Sign in again to continue.",
+  configuration:
+    "Sign-in is not configured yet. Please check the Supabase environment settings.",
+};
 export default async function Login({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string; notice?: string }>;
 }) {
-  const { error } = await searchParams;
+  const params = await searchParams;
+  const next = safeNext(params.next);
+  if (await getVerifiedUser()) redirect(next);
+  const enabled = configured();
+  const message =
+    messages[params.error || ""] ||
+    (!enabled ? messages.configuration : undefined);
   return (
     <main className="login-page">
       <div className="login-card">
@@ -24,32 +39,13 @@ export default async function Login({
           A thoughtful place to find opportunities, manage applications, and
           move forward.
         </p>
-        {error && (
+        {message && (
           <p role="alert" className="error">
-            {error}
+            {message}
           </p>
         )}
-        {configured() ? (
-          <Button asChild>
-            <a href="/auth/login">
-              Continue with Google
-              <ArrowRight size={17} />
-            </a>
-          </Button>
-        ) : (
-          <>
-            <div className="info-banner">
-              Account sign-in needs Supabase configuration. Follow the README to
-              connect your own project.
-            </div>
-            <Button asChild>
-              <Link href="/">
-                Explore the demo
-                <ArrowRight size={17} />
-              </Link>
-            </Button>
-          </>
-        )}
+        {params.notice === "signed_out" && <SignedOutNotice />}
+        <GoogleSignInButton next={next} disabled={!enabled} />
         <small>
           <ShieldCheck size={15} />
           Your search is personal. Your workspace stays private.

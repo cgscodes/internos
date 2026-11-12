@@ -11,6 +11,7 @@ import {
 import { useWorkspace } from "@/components/workspace-provider";
 import { profileSchema } from "@/lib/models";
 import { Button } from "@/components/ui/button";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 export default function Settings() {
   const { data, isDemo, saveProfile, busy } = useWorkspace();
   const [error, setError] = useState("");
@@ -137,9 +138,7 @@ export default function Settings() {
                 </a>
               </Button>
             ) : (
-              <form action="/auth/logout" method="POST">
-                <Button variant="outline">Sign out</Button>
-              </form>
+              <SignOutButton />
             )}
           </section>
           <section className="panel settings-card">

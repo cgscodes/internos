@@ -1,3 +1,4 @@
+import { isSameOrigin } from "@/lib/auth/origin";
 import { authorized } from "@/lib/supabase/server";
 import { z } from "zod";
 const types: Record<string, string> = {
@@ -6,7 +7,7 @@ const types: Record<string, string> = {
 };
 export async function POST(request: Request) {
   try {
-    if (request.headers.get("origin") !== new URL(request.url).origin)
+    if (!isSameOrigin(request))
       return Response.json({ error: "Invalid origin" }, { status: 403 });
     const { client, user } = await authorized();
     const form = await request.formData();
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
       throw new Error("The file is not a valid PDF.");
     if (ext === "docx" && (bytes[0] !== 80 || bytes[1] !== 75))
       throw new Error("The file is not a valid DOCX.");
-    const parent = form.get("parent_id");
+    const parentValue = form.get("parent_id");
+    const parent = parentValue ? z.uuid().parse(parentValue) : null;
     if (parent) {
       z.uuid().parse(parent);
       const { data } = await client
@@ -50,18 +52,16 @@ export async function POST(request: Request) {
       await client.storage.from("resumes").remove([path]);
       throw countError;
     }
-    const { error } = await client
-      .from("resumes")
-      .insert({
-        id,
-        user_id: user.id,
-        name: file.name.replace(/\.[^.]+$/, ""),
-        file_name: file.name,
-        size: file.size,
-        storage_path: path,
-        is_master: count === 0,
-        parent_id: parent || null,
-      });
+    const { error } = await client.from("resumes").insert({
+      id,
+      user_id: user.id,
+      name: file.name.replace(/\.[^.]+$/, ""),
+      file_name: file.name,
+      size: file.size,
+      storage_path: path,
+      is_master: count === 0,
+      parent_id: parent || null,
+    });
     if (error) {
       await client.storage.from("resumes").remove([path]);
       throw error;

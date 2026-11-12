@@ -15,6 +15,8 @@ import {
   PanelLeftClose,
 } from "lucide-react";
 import { useWorkspace } from "./workspace-provider";
+import { UserAvatar } from "./auth/user-avatar";
+import { SessionListener } from "./auth/session-listener";
 const links = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/discover", label: "Discover", icon: Compass },
@@ -25,13 +27,9 @@ const links = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { data, isDemo } = useWorkspace();
-  const initials = data.profile.full_name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("");
   return (
     <div className="app-shell">
+      {!isDemo && <SessionListener />}
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -78,11 +76,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <PanelLeftClose size={16} />
           </Link>
           <Link href="/settings" className="profile-link">
-            <span className="avatar">{initials}</span>
+            <span className="avatar">
+              <UserAvatar />
+            </span>
             <span>
               <strong>{data.profile.full_name}</strong>
               <small>
-                {isDemo ? "Personal workspace · Demo" : "Personal workspace"}
+                {isDemo
+                  ? "Personal workspace · Demo"
+                  : data.email || "Personal workspace"}
               </small>
             </span>
             <ChevronDown size={16} />
@@ -115,7 +117,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               className="avatar small"
               aria-label="Your profile"
             >
-              {initials}
+              <UserAvatar />
             </Link>
           </div>
         </header>

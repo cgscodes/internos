@@ -6,15 +6,34 @@ import {
   useEffect,
   useCallback,
 } from "react";
-import { Application, Workspace, Profile } from "@/lib/models";
-import { demo } from "@/lib/demo";
-import { applicationSchema, profileSchema } from "@/lib/models";
+import type { Application, Workspace, Profile } from "@/lib/models";
+import type { JobInput, WorkspaceMutation } from "@/lib/validation/tracking";
+import { applicationSchema, jobSchema } from "@/lib/models";
+import { loginPath } from "@/lib/auth/redirects";
+import { Button } from "./ui/button";
+async function readWorkspace(response: Response): Promise<Workspace> {
+  if (response.status === 401) {
+    window.location.replace(
+      new URL(
+        loginPath(window.location.pathname, "session_expired"),
+        window.location.origin,
+      ).href,
+    );
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Unable to load workspace");
+  return data;
+}
 type Context = {
   data: Workspace;
   isDemo: boolean;
   busy: boolean;
   error: string;
   save: (app: Application) => Promise<void>;
+  saveJob: (job: JobInput) => Promise<void>;
+  setStatus: (id: string, status: Application["status"]) => Promise<void>;
+  bookmark: (job_id: string, saved: boolean) => Promise<void>;
   remove: (id: string) => Promise<void>;
   saveProfile: (profile: Profile) => Promise<void>;
   reload: () => Promise<void>;
@@ -24,11 +43,10 @@ type Context = {
 const WorkspaceContext = createContext<Context | null>(null);
 export function WorkspaceProvider({
   initial,
-  isDemo,
   children,
 }: {
   initial: Workspace;
-  isDemo: boolean;
+  isDemo?: boolean;
   children: React.ReactNode;
 }) {
   const [data, setData] = useState(initial),
@@ -36,117 +54,83 @@ export function WorkspaceProvider({
     [error, setError] = useState(""),
     [notice, notify] = useState("");
   useEffect(() => {
-    if (!isDemo) return;
-    const timer = setTimeout(() => {
-      try {
-        const saved = localStorage.getItem("internos-demo-v1");
-        if (saved) {
-          const parsed = JSON.parse(saved) as Workspace;
-          if (
-            !Array.isArray(parsed.applications) ||
-            !Array.isArray(parsed.jobs) ||
-            !Array.isArray(parsed.events) ||
-            !Array.isArray(parsed.resumes) ||
-            !profileSchema.safeParse(parsed.profile).success ||
-            !parsed.applications.every(
-              (a) => applicationSchema.safeParse(a).success,
-            ) ||
-            !parsed.jobs.every((a) => applicationSchema.safeParse(a).success)
-          )
-            throw new Error("Invalid demo data");
-          setData(parsed);
-        }
-      } catch {
-        localStorage.removeItem("internos-demo-v1");
-      }
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [isDemo]);
-  useEffect(() => {
     if (!notice) return;
-    const id = setTimeout(() => notify(""), 4500);
-    return () => clearTimeout(id);
+    const timer = setTimeout(() => notify(""), 4500);
+    return () => clearTimeout(timer);
   }, [notice]);
-  const persist = (next: Workspace) => {
-    setData(next);
-    if (isDemo) localStorage.setItem("internos-demo-v1", JSON.stringify(next));
-  };
-  const mutate = async (
-    action: string,
-    payload: object,
-    local: () => Workspace,
-  ) => {
+  const mutate = async (mutation: WorkspaceMutation) => {
     setBusy(true);
     setError("");
     try {
-      if (isDemo) {
-        persist(local());
-      } else {
-        const res = await fetch("/api/workspace", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, ...payload }),
-        });
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error);
-        setData(result);
-      }
+      const response = await fetch("/api/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mutation),
+      });
+      setData(await readWorkspace(response));
       notify("Changes saved");
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Unable to save";
-      setError(message);
-      throw e;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to save");
+      throw error;
     } finally {
       setBusy(false);
     }
   };
   const reload = useCallback(async () => {
-    const res = await fetch("/api/workspace");
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error);
-    setData(result);
+    try {
+      setData(
+        await readWorkspace(
+          await fetch("/api/workspace", { cache: "no-store" }),
+        ),
+      );
+      setError("");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to reload");
+    }
   }, []);
   return (
     <WorkspaceContext.Provider
       value={{
         data,
-        isDemo,
+        isDemo: false,
         busy,
         error,
         notice,
         notify,
         reload,
         save: (app) =>
-          mutate("application", { data: app }, () => ({
-            ...data,
-            applications: [
-              app,
-              ...data.applications.filter((a) => a.id !== app.id),
-            ],
-            events: [
-              {
-                id: crypto.randomUUID(),
-                application_id: app.id,
-                description: `${app.status} · ${app.title} at ${app.company}`,
-                created_at: new Date().toISOString(),
-              },
-              ...data.events,
-            ],
-          })),
-        remove: (id) =>
-          mutate("delete", { id }, () => ({
-            ...data,
-            applications: data.applications.filter((a) => a.id !== id),
-            events: data.events.filter((e) => e.application_id !== id),
-          })),
-        saveProfile: (profile) =>
-          mutate("profile", { data: profile }, () => ({ ...data, profile })),
+          mutate({
+            action: data.applications.some((a) => a.id === app.id)
+              ? "application.update"
+              : "application.create",
+            data: applicationSchema.parse(app),
+          }),
+        saveJob: (job) =>
+          mutate({
+            action: data.jobs.some((j) => j.id === job.id)
+              ? "job.update"
+              : "job.create",
+            data: jobSchema.parse(job),
+          }),
+        setStatus: (id, status) => mutate({ action: "status", id, status }),
+        bookmark: (job_id, saved) =>
+          mutate({ action: "bookmark", job_id, saved }),
+        remove: (id) => mutate({ action: "delete", id }),
+        saveProfile: (profile) => mutate({ action: "profile", data: profile }),
       }}
     >
       {children}
-      {notice && (
+      {notice && !error && (
         <div role="status" className="toast">
           {notice}
+        </div>
+      )}
+      {error && (
+        <div role="alert" className="toast toast-error">
+          <span>{error}</span>
+          <Button variant="outline" onClick={() => void reload()}>
+            Reload workspace
+          </Button>
         </div>
       )}
     </WorkspaceContext.Provider>
@@ -157,4 +141,3 @@ export function useWorkspace() {
   if (!context) throw new Error("Workspace provider is required");
   return context;
 }
-export { demo };

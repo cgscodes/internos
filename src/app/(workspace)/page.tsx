@@ -19,14 +19,14 @@ import { useWorkspace } from "@/components/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { ApplicationDialog } from "@/components/application-dialog";
 import { Application } from "@/lib/models";
+import { applicationDraft, dashboardSummary } from "@/lib/business/tracking";
 import { Empty, JobCard, dateLabel } from "@/components/shared";
 export default function Overview() {
-  const { data, isDemo, save, notify } = useWorkspace();
+  const { data, isDemo, bookmark, busy } = useWorkspace();
   const [editing, setEditing] = useState<Application | null | undefined>();
   const apps = data.applications;
-  const active = apps.filter(
-    (a) => !["Rejected", "Withdrawn", "Offer", "Saved"].includes(a.status),
-  );
+  const today = new Date().toLocaleDateString("en-CA");
+  const summary = dashboardSummary(apps, today);
   const tasks = apps
     .filter(
       (a) => a.important_date || ["Preparing", "Ready"].includes(a.status),
@@ -39,32 +39,32 @@ export default function Overview() {
   const metrics = [
     {
       label: "Applications tracked",
-      value: apps.length,
+      value: summary.total,
       icon: BriefcaseBusiness,
-      detail: `${active.length} in progress`,
+      detail: `${summary.submitted} submitted`,
       color: "blue",
     },
     {
       label: "Active interviews",
-      value: apps.filter((a) => a.status === "Interview").length,
+      value: summary.interviews,
       icon: MessagesSquare,
       detail: "Your next conversations",
       color: "amber",
     },
     {
-      label: "Opportunities to explore",
-      value: data.jobs.length,
+      label: "Applications submitted",
+      value: summary.submitted,
       icon: Compass,
-      detail: isDemo
-        ? "Curated demo opportunities"
-        : "Available in your job library",
+      detail: "Applied, assessments, interviews, and outcomes",
       color: "blue",
     },
     {
       label: "Offers received",
-      value: apps.filter((a) => a.status === "Offer").length,
+      value: summary.offers,
       icon: Trophy,
-      detail: "Good things are happening",
+      detail: summary.offers
+        ? "Good things are happening"
+        : "Your next chapter is ahead",
       color: "green",
     },
   ];
@@ -221,23 +221,20 @@ export default function Overview() {
             <JobCard
               key={job.id}
               job={job}
-              saved={apps.some(
-                (a) => a.company === job.company && a.title === job.title,
-              )}
+              saved={data.bookmarks.includes(job.id)}
+              busy={busy}
               onDetails={() =>
-                setEditing({
-                  ...job,
-                  id: crypto.randomUUID(),
-                  created_at: new Date().toISOString(),
-                })
+                setEditing(
+                  data.applications.find(
+                    (app) =>
+                      app.job_id === job.id &&
+                      !["Rejected", "Withdrawn"].includes(app.status),
+                  ) || applicationDraft("Saved", job),
+                )
               }
               onSave={() => {
-                void save({
-                  ...job,
-                  id: crypto.randomUUID(),
-                  created_at: new Date().toISOString(),
-                }).catch(() =>
-                  notify("Could not save opportunity. Please try again."),
+                void bookmark(job.id, !data.bookmarks.includes(job.id)).catch(
+                  () => {},
                 );
               }}
             />
@@ -247,6 +244,43 @@ export default function Overview() {
           <Empty
             title="Your next opportunity is out there"
             description="Add an opportunity in Discover to start building your list."
+          />
+        )}
+      </section>
+      <section className="panel deadlines-panel">
+        <div className="section-heading">
+          <div>
+            <h2>
+              Upcoming deadlines{" "}
+              <span className="count-badge">{summary.upcoming.length}</span>
+            </h2>
+            <p>Application deadlines ahead, in date order.</p>
+          </div>
+          <CalendarDays size={19} className="muted" />
+        </div>
+        {summary.upcoming.length ? (
+          summary.upcoming.slice(0, 5).map((app) => (
+            <button
+              className="task-row"
+              key={app.id}
+              onClick={() => setEditing(app)}
+            >
+              <span className="task-copy">
+                <strong>
+                  {app.company} · {app.title}
+                </strong>
+                <small>{app.status}</small>
+              </span>
+              <time className="task-date" dateTime={app.deadline}>
+                {dateLabel(app.deadline)}
+              </time>
+              <ChevronRight size={16} />
+            </button>
+          ))
+        ) : (
+          <Empty
+            title="No upcoming deadlines"
+            description="Add a deadline to an application and it will appear here."
           />
         )}
       </section>
