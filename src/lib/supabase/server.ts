@@ -8,7 +8,9 @@ import { getSupabaseConfig, sessionCookieOptions } from "./config";
 import { loginPath } from "@/lib/auth/redirects";
 export { configured } from "./config";
 
-export async function createClient() {
+export async function createClient({
+  nativePkce = false,
+}: { nativePkce?: boolean } = {}) {
   const config = getSupabaseConfig();
   if (!config) throw new Error("Supabase is not configured.");
   const store = await cookies();
@@ -23,7 +25,13 @@ export async function createClient() {
       setAll: (values) => {
         try {
           values.forEach(({ name, value, options }) =>
-            store.set(name, value, options),
+            store.set(
+              name,
+              value,
+              nativePkce && name.includes("-code-verifier")
+                ? { ...options, httpOnly: true, maxAge: value ? 180 : 0 }
+                : options,
+            ),
           );
         } catch {
           /* Server Components are read-only; proxy refreshes and writes cookies before rendering. */

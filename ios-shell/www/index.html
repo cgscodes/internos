@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>InternOS</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #f7f8fa;
+        color: #162b46;
+        font:
+          16px -apple-system,
+          BlinkMacSystemFont,
+          sans-serif;
+      }
+      main {
+        padding: 32px;
+        max-width: 360px;
+      }
+      h1 {
+        font-size: 28px;
+      }
+      p {
+        color: #73839a;
+        line-height: 1.7;
+      }
+      button {
+        background: #3468a3;
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 14px 20px;
+        font: inherit;
+        min-height: 44px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>InternOS</h1>
+      <p>The workspace couldn’t load. Check your connection, then try again.</p>
+      <button id="retry" type="button">Retry connection</button>
+      <p id="status" role="status"></p>
+    </main>
+    <script>
+      const retry = document.getElementById("retry");
+      retry.addEventListener("click", () => {
+        retry.disabled = true;
+        document.getElementById("status").textContent = "Reconnecting…";
+        setTimeout(() => {
+          retry.disabled = false;
+          document.getElementById("status").textContent =
+            "Still unable to connect. Check your network and try again.";
+        }, 15000);
+        window.location.replace("https://internos-green.vercel.app/login");
+      });
+    </script>
+  </body>
+</html>

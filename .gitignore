@@ -46,3 +46,12 @@ next-env.d.ts
 /playwright-report/
 /supabase/.temp/
 /supabase/.branches/
+
+# Capacitor dependencies, build products, generated bridge assets, and local signing state
+/ios-shell/node_modules/
+/ios-shell/ios/App/App/public/
+/ios-shell/ios/App/App/capacitor.config.json
+/ios-shell/ios/App/App/config.xml
+/ios-shell/ios/App/Pods/
+/ios-shell/ios/**/xcuserdata/
+/ios-shell/ios/DerivedData/

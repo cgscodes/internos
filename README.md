@@ -158,3 +158,70 @@ Exit code 2 means required credentials were missing and the live test did not ru
 `npm test` applies both migrations to isolated PGlite databases and checks real PostgreSQL functions, RLS, ownership boundaries, history, rollback, duplicates/reapplication, empty counts, and validation. `npm run test:e2e` builds and runs the production Next.js app on port 3100, with simulated OAuth and a local PostgREST-compatible adapter backed by **the same real PGlite schema/functions/policies**, rather than JavaScript record mocks. It covers existing auth flows plus application/job CRUD, refresh persistence, bookmarks, counts, status failure handling, direct API isolation, and desktop/iPhone layouts. Test fixtures are inserted only into the isolated local database.
 
 These tests do not certify the deployed Supabase instance, its gateway configuration, or provider setup. Production persistence is **unverified until the live checklist or `test:live` succeeds**. No AI integration or scraping is included. Drag-and-drop, realtime subscriptions across devices, and server-side paginated catalog browsing are deferred; the current workspace refreshes snapshots after mutations and loads the visible catalog/history in batches. Browser tests temporarily build with test public environment values, so run a final `npm run build` with your real environment before deployment.
+
+## Capacitor iOS Google OAuth
+
+### Findings and architecture
+
+The original iOS shell had only Capacitor Core/iOS installed, no App/Browser plugins, and no `CFBundleURLTypes` registration. The login button always used the ordinary HTTPS web callback and had an unbounded pending state. `SceneDelegate` already forwarded UIScene URLs to Capacitor, but no JavaScript callback listener could consume them. The bundled fallback page also only said “Loading InternOS”. These are verified repository findings. No real Google authorization exchange was observed during implementation, so a particular live PKCE error or middleware redirect loop was **not** confirmed.
+
+Safari/system-browser and WKWebView sessions must not be assumed to share cookies. The native flow now starts PKCE **through a same-origin HTTP request from the hosted WebView**, opens Google through Capacitor Browser (`SFSafariViewController`), receives a **code-only** custom-scheme callback through Capacitor App, and sends the code back in a same-origin POST from the WebView. Next.js exchanges it using the original WebView's verifier cookie and establishes the normal Supabase cookies in that HTTP response. A separate verified-user read checks that the app retained those cookies before navigating. Safari cookies are never copied; access/refresh tokens never cross the native bridge or appear in the callback response.
+
+The remote `server.url` architecture is retained for this targeted fix. It can support this handoff because the hosted page is the WebView's first-party HTTPS origin, and the Capacitor bridge can deliver the callback back to that page. Capacitor documents `server.url` as a live-reload facility rather than a production deployment recommendation; this fix does not certify App Store review eligibility or the broader remote-code architecture. Do not replace it with a bundled `capacitor://localhost` frontend and expect these cookies to work unchanged: that would require a separate first-party/backend authentication design because it changes the request origin and cookie context. See the official [Capacitor configuration](https://capacitorjs.com/docs/config), [Browser API](https://capacitorjs.com/docs/apis/browser), and [App deep-link API](https://capacitorjs.com/docs/apis/app).
+
+### Files and safeguards
+
+- `src/lib/auth/native-contract.ts`: the sole allowed callback is `com.internos.mobile://auth/callback`. It accepts one nonce and one authorization code or OAuth error. Unknown destinations, duplicate parameters, token fragments, and callback-supplied `next` values are rejected.
+- `src/app/auth/native/start/route.ts`: same-origin start/cancel endpoints. The server chooses a random nonce, stores the validated destination in a host-only HttpOnly cookie, and generates PKCE with the existing Supabase SSR client. The native verifier is HttpOnly and expires with the three-minute attempt. This endpoint returns an authorization URL, not a session.
+- `src/app/auth/native/callback/route.ts`: same-origin POST checks the nonce/expiry, exchanges the one-use PKCE code, verifies `getUser()`, clears the attempt, and returns only a safe local destination. A mismatched nonce cannot consume the real attempt. `session/route.ts` verifies server recognition after cookie writes. Existing web `/auth/callback` behavior is retained.
+- `src/lib/auth/native-oauth.ts` and the existing sign-in button: native iOS detection, listeners installed before opening Browser, warm/cold launch recovery, duplicate callback suppression, lifecycle cleanup, browser dismissal, cancellation, and retry errors. Requests/plugin operations are bounded to 15 seconds and the native browser wait to three minutes. Ordinary web loading has a 30-second retry bound. Only a completed flow's nonce is cached; codes/tokens are not stored by this controller.
+- `ios-shell/capacitor.config.ts`, Info.plist and app delegates: registered scheme, App/Browser plugins, UIKit/UIScene forwarding, reuse of the existing storyboard bridge, and disabled bridge URL logging. Native HTTP/cookie monkey-patching is disabled so same-origin `fetch` uses WKWebView's own normal cookie store. External provider hosts are not added to WebView navigation permissions.
+- `ios-shell/www/index.html`: a connection failure page and bounded retry replace the endless bundled loading message. `server.errorPath` points to this fallback.
+
+Existing Supabase RLS policies, migrations, dashboard design, public-key configuration, and verified-user authorization are unchanged. The existing SSR session-cookie policy is preserved; making the native PKCE verifier HttpOnly does not change the browser session client into an HttpOnly-token architecture.
+
+### Deployment and native setup required
+
+1. Deploy the updated Next.js source to **https://internos-green.vercel.app** before testing the updated iOS binary. Its native endpoints must be available there; rebuilding only the Xcode app does not update hosted JavaScript or server routes. Set `NEXT_PUBLIC_SITE_URL=https://internos-green.vercel.app` alongside the existing public Supabase variables. No new secret, migration, or service-role credential is needed.
+2. In Supabase Authentication → URL Configuration, keep the existing HTTPS web callback allowlist entry and add this native redirect pattern, which allows the per-attempt nonce query:
+   ```text
+   com.internos.mobile://auth/callback?state=*
+   ```
+   The server always generates the exact fixed native path, and the app separately rejects any other path or extra redirect parameter. Follow Supabase's [redirect matching rules](https://supabase.com/docs/guides/auth/redirect-urls). If Supabase sends the user to the Site URL instead of the custom scheme, confirm the native allowlist matches the `redirect_to` value; do not add a catch-all HTTPS redirect.
+3. Google Cloud's OAuth **web client** redirect remains your **Supabase HTTPS** `/auth/v1/callback`, not the app's custom scheme. Keep Google enabled in Supabase. Google consent must happen in the system browser, not an embedded Google WKWebView login.
+4. Install both the web and native dependencies, sync the shell, then open the existing Xcode project:
+   ```sh
+   npm ci
+   npm --prefix ios-shell ci
+   npm --prefix ios-shell run sync
+   npm --prefix ios-shell run open
+   ```
+   `ios-shell/capacitor.config.ts` is the canonical spelling. The App/Browser native packages are registered by `cap sync`; its generated native config/bridge assets are intentionally ignored by Git and recreated by sync.
+5. In Xcode, build/run scheme **App**. The bundle ID and scheme are `com.internos.mobile`. Configure your own signing team for physical-device installs; simulator builds do not require a signing identity. Do not enable nonpersistent WebView data storage, widen navigation to Google hosts, copy Safari cookies, or add token-injection scripts.
+
+### Verification checklist
+
+| Scenario             | Verification                                                                                                                                                                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop web          | Open the deployed site in a fresh browser. Sign in with Google, reload, inspect a protected page, sign out. The ordinary HTTPS callback must still be used.                                                                                                                                 |
+| iPhone Safari        | Repeat directly in Safari, outside the shell. Native plugins must not activate.                                                                                                                                                                                                             |
+| Capacitor simulator  | Start from the app's login screen. Select Continue with Google, complete consent in the system sheet, and confirm the sheet dismisses and the requested dashboard opens **inside the app**.                                                                                                 |
+| App restart          | After success, terminate/reopen the app; protected pages should recognize the persisted WebView session. Also try terminating during consent and returning within three minutes: the cold-launch handler should recover it, or show a retry error if the process lost its cookies.          |
+| Sign-out             | Sign out inside Settings, then reopen a protected page and restart the app. Both should require login. Safari's independent login must not be copied back.                                                                                                                                  |
+| Cancellation         | Use the system sheet's Done/Cancel action or the app's Cancel sign-in action. Loading must stop, the pending verifier/nonce must be cleared, and a new attempt must work.                                                                                                                   |
+| Timeout/network loss | Leave consent unfinished past three minutes, or disable networking during completion. An actionable retry error must replace loading. Restore networking and start a fresh attempt.                                                                                                         |
+| Expired session      | Expire/revoke the Supabase test session. Refresh/reopen a protected page; authorization must fail closed, and native reauthentication should work.                                                                                                                                          |
+| Invalid callback     | Open `com.internos.mobile://auth/callback?state=invalid&code=test-only` with the simulator's URL opener. It must never authenticate. Wrong hosts/paths, nonce mismatch, duplicate callbacks and token fragments must fail safely. Never paste a real callback/code into a command or a log. |
+| Protected routes     | With no app session, check all five dashboard paths and direct APIs; existing redirects/401 responses must remain.                                                                                                                                                                          |
+
+For a simulator compile check without signing:
+
+```sh
+xcodebuild -project ios-shell/ios/App/App.xcodeproj -scheme App \
+  -sdk iphonesimulator -configuration Debug \
+  -derivedDataPath /tmp/internos-ios-build CODE_SIGNING_ALLOWED=NO build
+```
+
+Automated tests use simulated Capacitor plugin events and a simulated OAuth provider with genuinely separate system-browser/WebView cookie jars. They cover warm/cold return, normal server session establishment, no-token response bodies, persistence across reload, sign-out/protection, cancellation, bounded timeout, invalid/replayed callbacks, nonce mismatch, expired attempts, and missing PKCE. They do **not** run real Google consent or prove Safari/physical-device behavior. Web tests retain the existing desktop/iPhone viewport coverage; the iPhone viewport project uses Chromium, not actual iPhone Safari.
+
+The iOS simulator build and plugin registration were verified locally. No simulator was booted during the initial inspection; a live simulator/physical-device Google login still requires deploying these web changes, updating the Supabase allowlist, and completing the checklist interactively. Custom URL schemes are not exclusive to one installed app; PKCE prevents an interceptor from redeeming the code, but claimed HTTPS universal links provide stronger routing guarantees for a later public release. Universal links require an Apple Team ID, Associated Domains entitlement, and an `apple-app-site-association` file and are not silently enabled here.

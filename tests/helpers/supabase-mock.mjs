@@ -90,9 +90,15 @@ const server = createServer(async (request, response) => {
       const callback = new URL(
         url.searchParams.get("redirect_to") || appOrigin,
       );
+      const webCallback =
+        callback.origin === appOrigin && callback.pathname === "/auth/callback";
+      const nativeCallback =
+        callback.protocol === "com.internos.mobile:" &&
+        callback.hostname === "auth" &&
+        callback.pathname === "/callback" &&
+        /^[a-f0-9]{64}$/.test(callback.searchParams.get("state") || "");
       if (
-        callback.origin !== appOrigin ||
-        callback.pathname !== "/auth/callback" ||
+        (!webCallback && !nativeCallback) ||
         !url.searchParams.get("code_challenge")
       )
         return send(400, { error: "Invalid test OAuth request" });
