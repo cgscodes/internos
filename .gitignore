@@ -55,3 +55,10 @@ next-env.d.ts
 /ios-shell/ios/App/Pods/
 /ios-shell/ios/**/xcuserdata/
 /ios-shell/ios/DerivedData/
+
+# Local iOS device build and IPA artifacts
+/ios-shell/build/
+/ios-shell/ipa-output/
+
+# Generated, version-matched PDF.js worker (prebuild/predev)
+/public/pdf.worker-*.min.mjs

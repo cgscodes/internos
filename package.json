@@ -11,7 +11,9 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "format": "prettier --write src tests *.ts *.json README.md",
-    "test:live": "node scripts/verify-persistence.mjs"
+    "test:live": "node scripts/verify-persistence.mjs",
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
+    "predev": "node scripts/copy-pdf-worker.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.2",
@@ -24,9 +26,11 @@
     "@supabase/supabase-js": "^2.119.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "d3-sankey": "^0.12.3",
     "geist": "^1.9.2",
     "lucide-react": "^1.72.0",
     "next": "16.4.6",
+    "pdfjs-dist": "^6.5.438",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tailwind-merge": "^3.7.0",
@@ -37,6 +41,7 @@
     "@electric-sql/pglite": "^0.5.16",
     "@playwright/test": "^1.65.0",
     "@tailwindcss/postcss": "^4.3.5",
+    "@types/d3-sankey": "^0.12.5",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

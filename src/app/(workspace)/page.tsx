@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useWorkspace } from "@/components/workspace-provider";
 import { Button } from "@/components/ui/button";
+import { ApplicationFlow } from "@/components/application-flow";
 import { ApplicationDialog } from "@/components/application-dialog";
 import { PageHeader, StatCard } from "@/components/design/page";
 import { Application, statuses } from "@/lib/models";
@@ -344,6 +345,7 @@ export default function Overview() {
           </div>
         )}
       </section>
+      <ApplicationFlow />
       <section className="panel activity-panel">
         <div className="section-heading">
           <div>

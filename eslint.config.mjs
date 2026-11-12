@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "ios-shell/node_modules/**",
+    "ios-shell/build/**",
+    "ios-shell/ipa-output/**",
+    "public/pdf.worker-*.min.mjs",
     "ios-shell/ios/**",
   ]),
 ]);

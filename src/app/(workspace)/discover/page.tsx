@@ -7,6 +7,7 @@ import { applicationDraft } from "@/lib/business/tracking";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/dialog";
 import { ApplicationDialog } from "@/components/application-dialog";
+import { PdfJobImport } from "@/components/pdf-job-import";
 import { JobDialog } from "@/components/job-dialog";
 import { PageHeader } from "@/components/design/page";
 import { GlassSurface } from "@/components/design/glass";
@@ -42,10 +43,23 @@ export default function Discover() {
         title="Your next opportunity"
         description="A thoughtful shortlist. A place to start your next chapter."
         actions={
-          <Button onClick={() => setEditing(null)}>
-            <Plus size={18} />
-            Add opportunity
-          </Button>
+          <>
+            <PdfJobImport
+              onApplication={(job) =>
+                setApplication(
+                  data.applications.find(
+                    (app) =>
+                      app.job_id === job.id &&
+                      !["Rejected", "Withdrawn"].includes(app.status),
+                  ) || applicationDraft("Saved", job),
+                )
+              }
+            />
+            <Button onClick={() => setEditing(null)}>
+              <Plus size={18} />
+              Add opportunity
+            </Button>
+          </>
         }
       />
       <div className="info-banner">
