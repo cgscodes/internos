@@ -11,19 +11,19 @@ import {
 import { useWorkspace } from "@/components/workspace-provider";
 import { profileSchema } from "@/lib/models";
 import { Button } from "@/components/ui/button";
+import { AppearanceControls } from "@/components/design/appearance";
+import { PageHeader } from "@/components/design/page";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 export default function Settings() {
   const { data, isDemo, saveProfile, busy } = useWorkspace();
   const [error, setError] = useState("");
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">MAKE IT YOURS</div>
-          <h1>Your workspace, your way</h1>
-          <p>A little about you. A clearer direction for what comes next.</p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="A SPACE THAT FEELS LIKE YOU"
+        title="Your workspace, your way"
+        description="Your profile, your preferences, and the direction you’re heading."
+      />
       <div className="settings-layout">
         <form
           className="panel settings-form"
@@ -122,6 +122,14 @@ export default function Settings() {
           </div>
         </form>
         <div className="settings-side">
+          <section className="panel settings-card">
+            <h2>Appearance</h2>
+            <p>
+              Choose what feels comfortable. These preferences stay on this
+              device.
+            </p>
+            <AppearanceControls />
+          </section>
           <section className="panel settings-card">
             <ShieldCheck size={22} />
             <h2>Account security</h2>

@@ -91,7 +91,6 @@ export function JobCard({
       </p>
       <div className="job-tags">
         <span>{job.type}</span>
-        <span>Match score · Not connected</span>
       </div>
       <div className="job-card-footer">
         <span>

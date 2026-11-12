@@ -5,37 +5,42 @@ import { useWorkspace } from "@/components/workspace-provider";
 import { Application, statuses } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { ApplicationDialog } from "@/components/application-dialog";
-import { applicationDraft } from "@/lib/business/tracking";
-import { CompanyMark, Empty, Status, dateLabel } from "@/components/shared";
+import { Empty } from "@/components/shared";
+import { PageHeader } from "@/components/design/page";
+import { GlassSurface } from "@/components/design/glass";
+import { PipelineBoard, ViewSelector } from "@/components/design/pipeline";
 export default function Applications() {
-  const { data, busy, setStatus: updateStatus } = useWorkspace();
+  const { data } = useWorkspace();
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("All statuses"),
+    [view, setView] = useState<"board" | "list">("board"),
     [editing, setEditing] = useState<Application | null | undefined>();
   const apps = data.applications.filter(
-    (a) =>
-      `${a.company} ${a.title}`.toLowerCase().includes(query.toLowerCase()) &&
-      (status === "All statuses" || status === a.status),
+    (app) =>
+      `${app.company} ${app.title}`
+        .toLowerCase()
+        .includes(query.toLowerCase()) &&
+      (status === "All statuses" || app.status === status),
   );
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">EVERY STEP, IN ONE PLACE</div>
-          <h1>Your applications</h1>
-          <p>From first save to final offer. Keep your next move in view.</p>
-        </div>
-        <Button onClick={() => setEditing(null)}>
-          <Plus size={17} />
-          Add application
-        </Button>
-      </div>
-      <div className="filter-bar">
+      <PageHeader
+        eyebrow="FROM FIRST SAVE TO FINAL OFFER"
+        title="Your applications"
+        description="Every opportunity has a next step. Keep yours in view."
+        actions={
+          <Button onClick={() => setEditing(null)}>
+            <Plus size={18} />
+            Add application
+          </Button>
+        }
+      />
+      <GlassSurface className="filter-bar">
         <label className="search-field">
           <Search size={18} />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder="Search company or role…"
             aria-label="Search applications"
           />
@@ -45,92 +50,30 @@ export default function Applications() {
           <select
             aria-label="Filter by status"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(event) => setStatus(event.target.value)}
           >
             <option>All statuses</option>
-            {statuses.map((s) => (
-              <option key={s}>{s}</option>
+            {statuses.map((stage) => (
+              <option key={stage}>{stage}</option>
             ))}
           </select>
         </label>
         <span className="result-count">{apps.length} applications</span>
-      </div>
-      <div
-        className="kanban"
-        role="region"
-        aria-label="Applications grouped by status"
-        tabIndex={0}
-      >
-        {statuses
-          .filter((s) => status === "All statuses" || s === status)
-          .map((s) => (
-            <section className="kanban-column" key={s}>
-              <div className="kanban-heading">
-                <Status value={s} />
-                <span>{apps.filter((a) => a.status === s).length}</span>
-                <button
-                  className="icon-button"
-                  aria-label={`Add application in ${s}`}
-                  onClick={() => setEditing(applicationDraft(s))}
-                >
-                  <Plus size={16} />
-                </button>
-              </div>
-              {apps
-                .filter((a) => a.status === s)
-                .map((a) => (
-                  <article key={a.id} className="application-card">
-                    <button
-                      className="application-card-open"
-                      onClick={() => setEditing(a)}
-                      aria-label={`${a.company} ${a.title}`}
-                    >
-                      <div className="row">
-                        <CompanyMark name={a.company} />
-                        <strong>{a.company}</strong>
-                      </div>
-                      <h3>{a.title}</h3>
-                      <p>{a.location || "Location not specified"}</p>
-                      <div className="application-card-footer">
-                        <span>
-                          {a.deadline
-                            ? `Due ${dateLabel(a.deadline)}`
-                            : "No deadline"}
-                        </span>
-                        <span>↗</span>
-                      </div>
-                    </button>
-                    <label className="pipeline-status">
-                      Status
-                      <select
-                        aria-label={`Status for ${a.title} at ${a.company}`}
-                        value={a.status}
-                        disabled={busy}
-                        onChange={(event) => {
-                          void updateStatus(
-                            a.id,
-                            event.target.value as Application["status"],
-                          ).catch(() => {});
-                        }}
-                      >
-                        {statuses.map((status) => (
-                          <option key={status}>{status}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </article>
-                ))}
-              {!apps.some((a) => a.status === s) && (
-                <div className="column-empty">No applications yet</div>
-              )}
-            </section>
-          ))}
-      </div>
+        <ViewSelector view={view} onChange={setView} />
+      </GlassSurface>
+      <PipelineBoard
+        applications={apps}
+        status={status}
+        view={view}
+        onEdit={setEditing}
+      />
       {!apps.length && (
-        <Empty
-          title="Make your first move"
-          description="Add an application, or adjust your filters to see your opportunities."
-        />
+        <div className="panel">
+          <Empty
+            title="Make your first move"
+            description="Add an application, or adjust your filters to see your opportunities."
+          />
+        </div>
       )}
       <ApplicationDialog
         key={editing?.id || String(editing)}

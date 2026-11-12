@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useWorkspace } from "@/components/workspace-provider";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/design/page";
 import { Empty, dateLabel } from "@/components/shared";
 export default function Resumes() {
   const { data, isDemo, reload } = useWorkspace();
@@ -37,26 +38,23 @@ export default function Resumes() {
   }
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">PUT YOUR BEST SELF FORWARD</div>
-          <h1>A home for your resumes</h1>
-          <p>
-            Your experience, thoughtfully organized. Ready for the right
-            opportunity.
-          </p>
-        </div>
-        <Button
-          disabled={isDemo || busy}
-          onClick={() => {
-            setParent("");
-            input.current?.click();
-          }}
-        >
-          <Upload size={17} />
-          {busy ? "Uploading…" : "Upload resume"}
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="PUT YOUR BEST SELF FORWARD"
+        title="A home for your resumes"
+        description="One master document. Every thoughtful version. Ready when you are."
+        actions={
+          <Button
+            disabled={isDemo || busy}
+            onClick={() => {
+              setParent("");
+              input.current?.click();
+            }}
+          >
+            <Upload size={18} />
+            {busy ? "Uploading…" : "Upload resume"}
+          </Button>
+        }
+      />
       {isDemo && (
         <div className="info-banner">
           Private uploads require a connected Supabase account. Demo mode does

@@ -74,7 +74,7 @@ test("Google PKCE login returns to the requested page, persists, and signs out",
     page.getByRole("textbox", { name: "Email address", exact: true }),
   ).toHaveValue("alex@example.test");
   await expect(
-    page.getByRole("link", { name: "Your profile" }).locator("img"),
+    page.getByRole("button", { name: "Your profile" }).locator("img"),
   ).toHaveAttribute("src", "https://images.example.test/avatar.svg");
   const otherTab = await context.newPage();
   await otherTab.goto("/applications");

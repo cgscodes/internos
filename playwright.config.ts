@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "tests/e2e",
+  // Bound browser/axe concurrency when WebKit and Chromium share the local database.
+  workers: 3,
   use: { baseURL: "http://127.0.0.1:3100" },
   webServer: [
     {
@@ -22,6 +24,19 @@ export default defineConfig({
     },
   ],
   projects: [
+    {
+      name: "safari",
+      testMatch: "design.spec.ts",
+      use: {
+        ...devices["Desktop Safari"],
+        viewport: { width: 1440, height: 1000 },
+      },
+    },
+    {
+      name: "webkit-iphone",
+      testMatch: "design.spec.ts",
+      use: { ...devices["iPhone 13"] },
+    },
     {
       name: "desktop",
       use: {

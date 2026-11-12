@@ -10,26 +10,28 @@ import {
   Compass,
   Trophy,
   CalendarDays,
-  Check,
   ChevronRight,
-  Circle,
-  Sparkles,
+  Files,
+  Check,
+  Clock3,
 } from "lucide-react";
 import { useWorkspace } from "@/components/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { ApplicationDialog } from "@/components/application-dialog";
-import { Application } from "@/lib/models";
+import { PageHeader, StatCard } from "@/components/design/page";
+import { Application, statuses } from "@/lib/models";
 import { applicationDraft, dashboardSummary } from "@/lib/business/tracking";
-import { Empty, JobCard, dateLabel } from "@/components/shared";
+import { Empty, JobCard, Status, dateLabel } from "@/components/shared";
 export default function Overview() {
-  const { data, isDemo, bookmark, busy } = useWorkspace();
+  const { data, bookmark, busy } = useWorkspace();
   const [editing, setEditing] = useState<Application | null | undefined>();
   const apps = data.applications;
   const today = new Date().toLocaleDateString("en-CA");
   const summary = dashboardSummary(apps, today);
   const tasks = apps
     .filter(
-      (a) => a.important_date || ["Preparing", "Ready"].includes(a.status),
+      (app) =>
+        app.important_date || ["Preparing", "Ready"].includes(app.status),
     )
     .sort((a, b) =>
       (a.important_date || a.deadline).localeCompare(
@@ -41,104 +43,188 @@ export default function Overview() {
       label: "Applications tracked",
       value: summary.total,
       icon: BriefcaseBusiness,
-      detail: `${summary.submitted} submitted`,
-      color: "blue",
-    },
-    {
-      label: "Active interviews",
-      value: summary.interviews,
-      icon: MessagesSquare,
-      detail: "Your next conversations",
-      color: "amber",
+      detail: "Every opportunity, in one place",
+      tone: "blue",
     },
     {
       label: "Applications submitted",
       value: summary.submitted,
       icon: Compass,
-      detail: "Applied, assessments, interviews, and outcomes",
-      color: "blue",
+      detail: "Applications sent & outcomes",
+      tone: "blue",
+    },
+    {
+      label: "Active interviews",
+      value: summary.interviews,
+      icon: MessagesSquare,
+      detail: summary.interviews
+        ? "Keep the conversation going"
+        : "Your next conversation awaits",
+      tone: "amber",
     },
     {
       label: "Offers received",
       value: summary.offers,
       icon: Trophy,
       detail: summary.offers
-        ? "Good things are happening"
-        : "Your next chapter is ahead",
-      color: "green",
+        ? "A new chapter is opening"
+        : "Good things take a little time",
+      tone: "green",
     },
   ];
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">YOUR NEXT CHAPTER</div>
-          <h1>
+      <PageHeader
+        eyebrow="YOUR WORKSPACE, AT A GLANCE"
+        title={
+          <>
             Keep moving forward, {data.profile.full_name.split(" ")[0]}
             <span className="greeting-dot">.</span>
-          </h1>
-          <p>
-            A little clarity. A little progress. Your internship search, in one
-            place.
-          </p>
-        </div>
-        <Button onClick={() => setEditing(null)}>
-          <Plus size={17} />
-          Add application
-        </Button>
-      </div>
-      {isDemo && (
-        <div className="demo-banner">
-          <span>
-            <span className="demo-dot" />
-            You’re exploring a demo workspace. All opportunities and activity
-            are sample data.
-          </span>
-          <Link href="/login">
-            Connect your account <ArrowUpRight size={14} />
-          </Link>
-        </div>
-      )}
+          </>
+        }
+        description="A clear view of where you are. A little direction for what’s next."
+        actions={
+          <Button onClick={() => setEditing(null)}>
+            <Plus size={18} />
+            Add application
+          </Button>
+        }
+      />
       <div className="metric-grid">
-        {metrics.map(({ label, value, icon: Icon, detail, color }) => (
-          <div className="metric-card" key={label}>
-            <div className="row between">
-              <span>{label}</span>
-              <span className={`metric-icon ${color}`}>
-                <Icon size={18} />
-              </span>
-            </div>
-            <div className="metric-value">{String(value).padStart(2, "0")}</div>
-            <p>
-              <span className={`metric-indicator ${color}`} />
-              {detail}
-            </p>
-          </div>
+        {metrics.map((metric) => (
+          <StatCard key={metric.label} {...metric} />
         ))}
       </div>
-      <div className="overview-columns">
+      <div className="dashboard-grid">
+        <section className="panel pipeline-summary">
+          <div className="section-heading">
+            <div>
+              <h2>Your application pipeline</h2>
+              <p>Every stage of your next chapter.</p>
+            </div>
+            <Link className="text-link" href="/applications">
+              View board
+              <ArrowUpRight size={16} />
+            </Link>
+          </div>
+          {apps.length ? (
+            <>
+              <div
+                className="pipeline-bar"
+                role="img"
+                aria-label={statuses
+                  .map(
+                    (status) =>
+                      `${status}: ${apps.filter((app) => app.status === status).length}`,
+                  )
+                  .join(", ")}
+              >
+                {statuses.map((status) => {
+                  const count = apps.filter(
+                    (app) => app.status === status,
+                  ).length;
+                  return count > 0 ? (
+                    <span
+                      key={status}
+                      className={`pipeline-segment stage-${status.toLowerCase()}`}
+                      style={{ flex: count }}
+                    />
+                  ) : null;
+                })}
+              </div>
+              <div className="pipeline-stages">
+                {statuses.map((status) => (
+                  <div key={status}>
+                    <Status value={status} />
+                    <span>
+                      {apps.filter((app) => app.status === status).length}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <Empty
+              title="Your pipeline starts here"
+              description="Add your first application. Every step will have a place to land."
+            />
+          )}
+          <div className="panel-footer">
+            <span>
+              <span className="success-dot" />
+              {summary.submitted} submitted applications
+            </span>
+            <Link className="text-link" href="/applications">
+              Manage pipeline
+              <ArrowRight size={16} />
+            </Link>
+          </div>
+        </section>
+        <section className="panel deadlines-panel">
+          <div className="section-heading">
+            <div>
+              <h2>
+                Upcoming deadlines
+                <span className="count-badge">{summary.upcoming.length}</span>
+              </h2>
+              <p>A little preparation goes a long way.</p>
+            </div>
+            <CalendarDays size={20} className="muted" />
+          </div>
+          {summary.upcoming.length ? (
+            summary.upcoming.slice(0, 4).map((app) => (
+              <button
+                className="task-row deadline-row"
+                key={app.id}
+                onClick={() => setEditing(app)}
+              >
+                <span className="date-tile">
+                  <strong>
+                    {new Date(app.deadline + "T12:00:00").getDate()}
+                  </strong>
+                  <small>
+                    {new Date(app.deadline + "T12:00:00").toLocaleDateString(
+                      "en-US",
+                      { month: "short" },
+                    )}
+                  </small>
+                </span>
+                <span className="task-copy">
+                  <strong>{app.company}</strong>
+                  <small>{app.title}</small>
+                </span>
+                <ChevronRight size={16} />
+              </button>
+            ))
+          ) : (
+            <Empty
+              title="No upcoming deadlines"
+              description="Add application deadlines to stay one step ahead."
+            />
+          )}
+        </section>
         <section className="panel next-actions">
           <div className="section-heading">
             <div>
               <h2>
-                Next on your list{" "}
+                Next on your list
                 <span className="count-badge">{tasks.length}</span>
               </h2>
-              <p>Small steps that make a difference.</p>
+              <p>Small steps. Meaningful progress.</p>
             </div>
-            <CalendarDays size={19} className="muted" />
+            <Clock3 size={20} className="muted" />
           </div>
           {tasks.length ? (
-            tasks.slice(0, 3).map((a, i) => (
+            tasks.slice(0, 3).map((app) => (
               <button
                 className="task-row"
-                onClick={() => setEditing(a)}
-                key={a.id}
+                key={app.id}
+                onClick={() => setEditing(app)}
               >
-                <span className={`task-icon ${i === 0 ? "blue" : "neutral"}`}>
-                  {a.status === "Interview" ? (
+                <span className="task-icon">
+                  {app.status === "Interview" ? (
                     <MessagesSquare size={18} />
-                  ) : a.status === "Ready" ? (
+                  ) : app.status === "Ready" ? (
                     <Check size={18} />
                   ) : (
                     <BriefcaseBusiness size={18} />
@@ -146,74 +232,83 @@ export default function Overview() {
                 </span>
                 <span className="task-copy">
                   <strong>
-                    {a.status === "Interview"
+                    {app.status === "Interview"
                       ? "Prepare for your interview"
-                      : a.status === "Ready"
+                      : app.status === "Ready"
                         ? "Send your application"
                         : "Finish your application"}
                   </strong>
                   <small>
-                    {a.company} <span>·</span> {a.title}
+                    {app.company} · {app.title}
                   </small>
                 </span>
                 <span className="task-date">
-                  {a.important_date
-                    ? dateLabel(a.important_date)
-                    : a.deadline
-                      ? `Due ${dateLabel(a.deadline)}`
+                  {app.important_date
+                    ? dateLabel(app.important_date)
+                    : app.deadline
+                      ? dateLabel(app.deadline)
                       : "Next step"}
                 </span>
-                <ChevronRight size={16} className="muted" />
+                <ChevronRight size={16} />
               </button>
             ))
           ) : (
             <Empty
               title="A clear slate"
-              description="Add an application or an important date to plan your next step."
+              description="Your next actions appear here as you prepare applications and interviews."
             />
           )}
-          <Link className="panel-footer-link" href="/applications">
-            View all applications <ArrowRight size={15} />
-          </Link>
         </section>
-        <section className="focus-card">
-          <span className="focus-icon">
-            <Compass size={24} />
-          </span>
-          <span className="tiny-label">YOUR SEARCH, WITH DIRECTION</span>
-          <h2>
-            A great fit is
-            <br />
-            worth finding.
-          </h2>
-          <p>
-            Explore opportunities that could be the start of something good.
-          </p>
-          <Button asChild variant="outline">
-            <Link href="/discover">
-              Discover opportunities
+        <section className="panel quick-actions">
+          <div className="section-heading">
+            <div>
+              <h2>A good next move</h2>
+              <p>A shortcut to what matters.</p>
+            </div>
+            <ArrowUpRight size={20} className="muted" />
+          </div>
+          {[
+            {
+              href: "/discover",
+              icon: Compass,
+              title: "Find your next opportunity",
+              detail: "Explore your job library",
+            },
+            {
+              href: "/resumes",
+              icon: Files,
+              title: "Put your best self forward",
+              detail: "Organize resumes and versions",
+            },
+            {
+              href: "/settings",
+              icon: BriefcaseBusiness,
+              title: "Make room for your goals",
+              detail: "Update your career preferences",
+            },
+          ].map(({ href, icon: Icon, title, detail }) => (
+            <Link className="quick-action" key={href} href={href}>
+              <span className="task-icon">
+                <Icon size={18} />
+              </span>
+              <span>
+                <strong>{title}</strong>
+                <small>{detail}</small>
+              </span>
               <ArrowUpRight size={16} />
             </Link>
-          </Button>
-          <span className="focus-decoration" aria-hidden="true">
-            <Circle />
-            <Circle />
-            <Circle />
-          </span>
+          ))}
         </section>
       </div>
       <section className="opportunities-section">
         <div className="section-heading">
           <div>
             <h2>Worth a closer look</h2>
-            <p>
-              {isDemo
-                ? "A few sample opportunities to explore."
-                : "Opportunities from your library. AI recommendations are not connected."}
-            </p>
+            <p>A few opportunities from your library to explore.</p>
           </div>
           <Link className="text-link" href="/discover">
-            Explore all <ArrowRight size={15} />
+            Explore all
+            <ArrowRight size={16} />
           </Link>
         </div>
         <div className="job-grid">
@@ -241,67 +336,32 @@ export default function Overview() {
           ))}
         </div>
         {!data.jobs.length && (
-          <Empty
-            title="Your next opportunity is out there"
-            description="Add an opportunity in Discover to start building your list."
-          />
-        )}
-      </section>
-      <section className="panel deadlines-panel">
-        <div className="section-heading">
-          <div>
-            <h2>
-              Upcoming deadlines{" "}
-              <span className="count-badge">{summary.upcoming.length}</span>
-            </h2>
-            <p>Application deadlines ahead, in date order.</p>
+          <div className="panel">
+            <Empty
+              title="Your next opportunity is out there"
+              description="Add a role you’ve found in Discover to begin your search."
+            />
           </div>
-          <CalendarDays size={19} className="muted" />
-        </div>
-        {summary.upcoming.length ? (
-          summary.upcoming.slice(0, 5).map((app) => (
-            <button
-              className="task-row"
-              key={app.id}
-              onClick={() => setEditing(app)}
-            >
-              <span className="task-copy">
-                <strong>
-                  {app.company} · {app.title}
-                </strong>
-                <small>{app.status}</small>
-              </span>
-              <time className="task-date" dateTime={app.deadline}>
-                {dateLabel(app.deadline)}
-              </time>
-              <ChevronRight size={16} />
-            </button>
-          ))
-        ) : (
-          <Empty
-            title="No upcoming deadlines"
-            description="Add a deadline to an application and it will appear here."
-          />
         )}
       </section>
       <section className="panel activity-panel">
         <div className="section-heading">
           <div>
             <h2>Recent activity</h2>
-            <p>Your progress, one update at a time.</p>
+            <p>The small wins, and the steps between them.</p>
           </div>
-          <span className="subtle-label">
-            {isDemo ? "SAMPLE ACTIVITY" : "YOUR WORKSPACE"}
-          </span>
+          <span className="subtle-label">YOUR WORKSPACE</span>
         </div>
-        {data.events.slice(0, 4).map((event, i) => (
+        {data.events.slice(0, 5).map((event) => (
           <div className="activity-row" key={event.id}>
-            <span className={`activity-dot ${i === 0 ? "blue" : ""}`} />
+            <span className="activity-dot" />
             <div>
               <strong>{event.description}</strong>
-              <small>{dateLabel(event.created_at)}</small>
+              <small>Application update</small>
             </div>
-            <span className="activity-label">Application update</span>
+            <time dateTime={event.created_at}>
+              {dateLabel(event.created_at)}
+            </time>
           </div>
         ))}
         {!data.events.length && (
@@ -311,12 +371,6 @@ export default function Overview() {
           />
         )}
       </section>
-      <div className="quiet-note">
-        <Sparkles size={15} />
-        <span>
-          You don’t need to have it all figured out. Just take the next step.
-        </span>
-      </div>
       <ApplicationDialog
         key={editing?.id || String(editing)}
         application={editing}

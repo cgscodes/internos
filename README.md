@@ -2,6 +2,8 @@
 
 A mobile-first internship workspace built with Next.js App Router, strict TypeScript, Tailwind CSS, shadcn-style components, Radix Dialog, Lucide, and Supabase. Vercel-compatible; no Firebase or service-role key.
 
+See [the UI redesign report and release/IPA handoff](docs/ui-redesign.md) for design tokens, screenshots, accessibility validation, and the deployment checklist. The redesign is local until explicitly approved for deployment.
+
 ## Start the existing application
 
 Requires Node.js 22.13+ and npm. Keep your existing `.env.local` intact.
@@ -49,7 +51,7 @@ See the official [Supabase Google OAuth guide](https://supabase.com/docs/guides/
 npm run lint
 npm run typecheck
 npm test
-npx playwright install chromium  # once
+npx playwright install chromium webkit  # once
 npm run test:e2e
 npm run build
 npm start

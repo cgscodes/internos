@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/dialog";
 import { ApplicationDialog } from "@/components/application-dialog";
 import { JobDialog } from "@/components/job-dialog";
+import { PageHeader } from "@/components/design/page";
+import { GlassSurface } from "@/components/design/glass";
 import { JobCard, CompanyMark, Empty, dateLabel } from "@/components/shared";
 export default function Discover() {
   const { data, bookmark, busy } = useWorkspace();
@@ -35,23 +37,23 @@ export default function Discover() {
   const canEdit = details?.created_by === data.identity?.id;
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">FIND YOUR DIRECTION</div>
-          <h1>Your next opportunity</h1>
-          <p>Find something that speaks to you. Save it. Make it happen.</p>
-        </div>
-        <Button onClick={() => setEditing(null)}>
-          <Plus size={17} />
-          Add opportunity
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="FIND SOMETHING WORTH PURSUING"
+        title="Your next opportunity"
+        description="A thoughtful shortlist. A place to start your next chapter."
+        actions={
+          <Button onClick={() => setEditing(null)}>
+            <Plus size={18} />
+            Add opportunity
+          </Button>
+        }
+      />
       <div className="info-banner">
         Your opportunity library · Manual postings and the shared catalog. No
         automated feed or AI match scoring is connected. Bookmark a job, then
         start an application from its details.
       </div>
-      <div className="filter-bar">
+      <GlassSurface className="filter-bar">
         <label className="search-field">
           <Search size={18} />
           <input
@@ -80,7 +82,7 @@ export default function Discover() {
           <option>Bookmarked</option>
         </select>
         <span className="result-count">{jobs.length} opportunities</span>
-      </div>
+      </GlassSurface>
       <div className="job-grid discover-grid">
         {jobs.map((job) => (
           <JobCard

@@ -8,16 +8,17 @@ import {
   Files,
   Settings,
   ArrowUpRight,
-  ChevronDown,
   BriefcaseBusiness,
   Search,
-  CircleHelp,
-  PanelLeftClose,
+  ShieldCheck,
+  ChevronRight,
 } from "lucide-react";
 import { useWorkspace } from "./workspace-provider";
-import { UserAvatar } from "./auth/user-avatar";
 import { SessionListener } from "./auth/session-listener";
-const links = [
+import { GlassNavigation, GlassToolbar, GlassTabBar } from "./design/glass";
+import { AppearanceMenu } from "./design/appearance";
+import { ProfileMenu, NotificationsMenu } from "./design/workspace-menus";
+export const navigation = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/discover", label: "Discover", icon: Compass },
   { href: "/applications", label: "Applications", icon: Columns3 },
@@ -26,30 +27,40 @@ const links = [
 ];
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  const { data, isDemo } = useWorkspace();
+  const { data } = useWorkspace();
   return (
     <div className="app-shell">
-      {!isDemo && <SessionListener />}
+      <SessionListener />
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <aside className="sidebar">
+      <GlassNavigation>
         <Link href="/" className="brand">
           <span className="brand-icon">
-            <BriefcaseBusiness size={22} />
+            <BriefcaseBusiness size={21} />
           </span>
-          Intern<span className="brand-os">OS</span>
+          <span>
+            Intern<span className="brand-os">OS</span>
+          </span>
+          <span className="brand-dot" />
         </Link>
-        <div className="workspace-label">YOUR WORKSPACE</div>
+        <div className="workspace-switcher">
+          <span className="workspace-monogram">P</span>
+          <span>
+            <strong>Personal workspace</strong>
+            <small>Your next chapter</small>
+          </span>
+        </div>
+        <div className="workspace-label">WORKSPACE</div>
         <nav aria-label="Main navigation">
-          {links.map(({ href, label, icon: Icon }) => (
+          {navigation.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
               className={`nav-link ${path === href ? "active" : ""}`}
               aria-current={path === href ? "page" : undefined}
             >
-              <Icon size={19} />
+              <Icon size={18} />
               {label}
               {label === "Applications" && (
                 <span className="nav-count">{data.applications.length}</span>
@@ -58,79 +69,67 @@ export function Shell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-note">
-            <span className="tiny-label">A LITTLE PROGRESS, EVERY DAY</span>
+          <section className="sidebar-note">
+            <span className="tiny-label">ONE STEP CLOSER</span>
             <h3>
-              Your next chapter
+              Make your next
               <br />
-              starts here.
+              move a good one.
             </h3>
-            <p>Find your direction. Make your move.</p>
+            <p>A clear space for what comes next.</p>
             <Link href="/discover">
-              Explore opportunities <ArrowUpRight size={15} />
+              Explore opportunities
+              <ArrowUpRight size={16} />
             </Link>
+          </section>
+          <div className="workspace-security">
+            <ShieldCheck size={14} />
+            <span>Private by default</span>
+            <i />
           </div>
-          <Link className="help-link" href="/settings">
-            <CircleHelp size={17} />
-            Workspace & account
-            <PanelLeftClose size={16} />
-          </Link>
-          <Link href="/settings" className="profile-link">
-            <span className="avatar">
-              <UserAvatar />
-            </span>
-            <span>
-              <strong>{data.profile.full_name}</strong>
-              <small>
-                {isDemo
-                  ? "Personal workspace · Demo"
-                  : data.email || "Personal workspace"}
-              </small>
-            </span>
-            <ChevronDown size={16} />
-          </Link>
+          <ProfileMenu expanded />
         </div>
-      </aside>
+      </GlassNavigation>
       <div className="main-area">
-        <header className="utility-bar">
+        <GlassToolbar>
           <div className="breadcrumb">
-            Workspace <span>/</span>
+            <span>Workspace</span>
+            <ChevronRight size={13} />
             <strong>
-              {links.find((l) => l.href === path)?.label || "Overview"}
+              {navigation.find((link) => link.href === path)?.label ||
+                "Overview"}
             </strong>
           </div>
           <Link href="/" className="mobile-brand">
+            <span className="brand-icon">
+              <BriefcaseBusiness size={18} />
+            </span>
             InternOS
           </Link>
           <div className="utility-right">
             <Link href="/discover" className="utility-search">
               <Search size={16} />
-              <span>Find an opportunity</span>
+              <span>Find your next role</span>
               <kbd>↗</kbd>
             </Link>
-            <span className={`connection ${isDemo ? "" : "live"}`}>
-              <i />
-              {isDemo ? "Demo workspace" : "Connected"}
-            </span>
-            <Link
-              href="/settings"
-              className="avatar small"
-              aria-label="Your profile"
-            >
-              <UserAvatar />
-            </Link>
+            <AppearanceMenu />
+            <NotificationsMenu />
+            <span className="toolbar-divider" />
+            <ProfileMenu />
           </div>
-        </header>
+        </GlassToolbar>
         <main id="main" className="content">
           {children}
           <footer className="page-footer">
-            <span>Built for your next chapter.</span>
-            <span>One step closer.</span>
+            <span>
+              <span className="footer-mark" />A little progress, every day.
+            </span>
+            <span>InternOS · Your next chapter</span>
           </footer>
         </main>
       </div>
-      <nav className="bottom-nav" aria-label="Mobile navigation">
-        {links.map(({ href, label, icon: Icon }) => (
+      <GlassTabBar aria-label="Mobile navigation">
+        {navigation.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -141,7 +140,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <span>{label}</span>
           </Link>
         ))}
-      </nav>
+      </GlassTabBar>
     </div>
   );
 }
