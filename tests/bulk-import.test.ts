@@ -13,13 +13,15 @@ import {
   importFieldsSchema,
   normalizeExtractedRow,
   importValidationMessages,
+  reviewImportRow,
+  prepareSelectedImports,
 } from "../src/lib/pdf/tracker.ts";
 import {
   currentApplicationFlow,
   applicationFlow,
 } from "../src/lib/business/application-flow.ts";
 import { applicationSchema, type Activity } from "../src/lib/models.ts";
-import { trackerPdf } from "./helpers/job-pdf.mjs";
+import { trackerPdf, offsetTrackerRows } from "./helpers/job-pdf.mjs";
 import { createTestDatabase } from "./helpers/database.mjs";
 const hash = "a".repeat(64);
 const alice = "00000000-0000-4000-8000-000000000001",
@@ -444,4 +446,211 @@ test("extracted rows and editable drafts allow uncertainty, while final records 
     assert.equal(mapHandshakeStatus(status), "");
   assert.equal(normalizeExtractedRow({ type: "co-op" }).type, "Co-op");
   assert.equal(normalizeExtractedRow({ type: "Full-time" }).type, "");
+});
+
+async function offsetRows() {
+  const layout = await extractPdfLayout(
+    new Uint8Array(trackerPdf(offsetTrackerRows, true)),
+    undefined,
+    true,
+  );
+  return parseTracker(layout.pages, hash);
+}
+test("offset metadata and wrapped headings reconstruct shared rows across every page without dropping visible dates or statuses", async () => {
+  const rows = await offsetRows();
+  assert.equal(rows.length, 9);
+  const expected = offsetTrackerRows.flat();
+  for (const [index, row] of rows.entries()) {
+    assert.equal(
+      row.company,
+      expected[index][0],
+      `company at row ${index + 1}`,
+    );
+    assert.equal(row.title, expected[index][1], `role at row ${index + 1}`);
+    assert.equal(
+      row.applied_on,
+      parseAppliedDate(expected[index][2]),
+      `date at row ${index + 1}`,
+    );
+    assert.equal(
+      row.location,
+      expected[index][3],
+      `location at row ${index + 1}`,
+    );
+    assert.equal(
+      row.source_status,
+      expected[index][4],
+      `source status at row ${index + 1}`,
+    );
+    assert.equal(
+      row.status,
+      mapHandshakeStatus(expected[index][4]),
+      `normalized status at row ${index + 1}`,
+    );
+    assert.ok(!row.warnings.some((w) => /missing|ambiguous/i.test(w)));
+  }
+  assert.deepEqual(
+    rows.slice(0, 3).map((row) => row.applied_on),
+    ["2026-11-10", "2026-11-02", "2026-03-27"],
+  );
+  assert.equal(rows[3].status, "Offer");
+  assert.equal(rows[4].status, "");
+  assert.equal(rows[5].status, "");
+  assert.equal(rows[6].applied_on, "");
+  assert.equal(rows[7].applied_on, "2026-10-18"); // A genuinely missing date cannot shift later cells up.
+  assert.equal(rows[7].company, "");
+  assert.equal(rows[8].title, "");
+  assert.equal(mapHandshakeStatus("Applied Applied"), "Applied");
+});
+
+test("truncation warnings never block selected eligible applications and invalid/unconfirmed rows are retained individually", async () => {
+  const drafts = (await offsetRows()).map((row) => ({
+    ...row,
+    type: "Internship" as const,
+    reviewed: true,
+  }));
+  const { ready, skipped } = prepareSelectedImports(drafts);
+  assert.equal(ready.length, 4);
+  assert.equal(skipped.length, 5);
+  for (const { row, data } of ready) {
+    const review = reviewImportRow(row);
+    assert.equal(review.eligible, true);
+    assert.equal(review.needsAttention, false);
+    assert.ok(
+      review.warnings.filter((w) => w.includes("truncated")).length === 3,
+    );
+    assert.equal(data.company, row.company);
+    assert.equal(data.title, row.title);
+    assert.equal(data.location, row.location);
+  }
+  const skippedByIndex = new Map(
+    skipped.map((item) => [item.index, item.errors.join(" ")]),
+  );
+  assert.match(skippedByIndex.get(4)!, /Status needs confirmation/);
+  assert.match(skippedByIndex.get(5)!, /Status needs confirmation/);
+  assert.match(skippedByIndex.get(6)!, /valid application date/);
+  assert.match(skippedByIndex.get(7)!, /Company is required/);
+  assert.match(skippedByIndex.get(8)!, /Job title is required/);
+  assert.equal(drafts[6].selected, true);
+  assert.equal(
+    prepareSelectedImports([{ ...drafts[0], reviewed: false }, drafts[1]]).ready
+      .length,
+    1,
+  );
+  assert.equal(
+    prepareSelectedImports(drafts.map((row) => ({ ...row, selected: false })))
+      .ready.length,
+    0,
+  );
+  assert.equal(
+    reviewImportRow({ ...drafts[0], company: "…", title: "..." }).eligible,
+    false,
+  );
+  const corrected = {
+    ...drafts[0],
+    company: "Known company",
+    title: "Known role",
+    location: "Remote",
+  };
+  assert.equal(reviewImportRow(corrected).warnings.length, 0); // No stale extraction warning after correction.
+});
+
+test("truncated aligned rows persist through existing transactions, reimport idempotently, and update stored analytics without invented transitions", async () => {
+  const db = await createTestDatabase();
+  try {
+    await db.query("insert into auth.users(id) values($1)", [alice]);
+    await db.exec(
+      `set role authenticated;select set_config('request.jwt.claim.sub','${alice}',false)`,
+    );
+    const rows = (await offsetRows()).map((row) => ({
+      ...row,
+      type: "Co-op" as const,
+      reviewed: true,
+    }));
+    const { ready } = prepareSelectedImports(rows);
+    for (let repeat = 0; repeat < 2; repeat++)
+      for (const { data } of ready) {
+        const result = (
+          await db.query<{ result: { outcome: string } }>(
+            "select public.import_tracking_application($1::jsonb) as result",
+            [JSON.stringify(data)],
+          )
+        ).rows[0].result;
+        assert.equal(result.outcome, repeat ? "duplicate" : "created");
+      }
+    const stored = (
+      await db.query("select *,applied_on::text from public.applications")
+    ).rows.map((row) =>
+      applicationSchema.parse(JSON.parse(JSON.stringify(row))),
+    );
+    assert.equal(stored.length, 4);
+    assert.equal(
+      stored.find((row) => row.company === "Example Labs...")?.applied_on,
+      "2026-11-10",
+    );
+    assert.equal(
+      stored.find((row) => row.company === "Offer Studio...")?.source_status,
+      "Hired",
+    );
+    const flow = currentApplicationFlow(stored, 3650, "2026-11-17");
+    assert.equal(flow.total, 4);
+    assert.equal(
+      flow.rows.reduce((sum, row) => sum + row.count, 0),
+      4,
+    );
+    const events = (
+      await db.query<Activity>("select * from public.application_events")
+    ).rows;
+    assert.equal(events.length, 4);
+    assert.equal(applicationFlow(events).total, 0);
+  } finally {
+    await db.close();
+  }
+});
+
+test("a dated table row missing both identity fields is kept invalid without shifting neighboring metadata", async () => {
+  const pdf = trackerPdf(
+    [
+      [
+        ["First...", "First role...", "11/10/26", "Remote...", "Applied"],
+        ["", "", "11/02/26", "Boston...", "Interviewing"],
+        ["Last...", "Last role...", "03/27/26", "Remote...", "Saved"],
+      ],
+    ],
+    true,
+  );
+  const rows = parseTracker(
+    (await extractPdfLayout(new Uint8Array(pdf), undefined, true)).pages,
+    hash,
+  );
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].company, "");
+  assert.equal(rows[1].title, "");
+  assert.deepEqual(
+    rows.map((row) => row.applied_on),
+    ["2026-11-10", "2026-11-02", "2026-03-27"],
+  );
+  assert.deepEqual(
+    rows.map((row) => row.source_status),
+    ["Applied", "Interviewing", "Saved"],
+  );
+  const selection = prepareSelectedImports(
+    rows.map((row) => ({
+      ...row,
+      type: "Internship" as const,
+      reviewed: true,
+    })),
+  );
+  assert.equal(selection.ready.length, 2);
+  assert.equal(selection.skipped.length, 1);
+  assert.ok(
+    selection.skipped[0].errors.some((error) =>
+      error.includes("Company is required"),
+    ),
+  );
+  assert.ok(
+    selection.skipped[0].errors.some((error) =>
+      error.includes("Job title is required"),
+    ),
+  );
 });

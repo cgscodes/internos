@@ -38,12 +38,20 @@ export const finalizedImportRowSchema = z.object({
     .string()
     .trim()
     .min(1, "Company is required.")
-    .max(120, "Company must be at most 120 characters."),
+    .max(120, "Company must be at most 120 characters.")
+    .refine(
+      (value) => !value || /[\p{L}\p{N}]/u.test(value),
+      "Company is required. Enter an identifiable company.",
+    ),
   title: z
     .string()
     .trim()
     .min(1, "Job title is required.")
-    .max(160, "Job title must be at most 160 characters."),
+    .max(160, "Job title must be at most 160 characters.")
+    .refine(
+      (value) => !value || /[\p{L}\p{N}]/u.test(value),
+      "Job title is required. Enter an identifiable job title.",
+    ),
   location: z
     .string()
     .trim()
@@ -104,10 +112,21 @@ const statusMappings = new Map<string, Application["status"]>([
   ["hired", "Offer"],
 ]);
 export function mapHandshakeStatus(value: string): Application["status"] | "" {
-  return statusMappings.get(value.trim().toLowerCase()) || "";
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  const words = normalized.split(" ");
+  return (
+    statusMappings.get(normalized) ||
+    (words.every((word) => word === words[0])
+      ? statusMappings.get(words[0])
+      : "") ||
+    ""
+  );
 }
 export function parseAppliedDate(value: string) {
-  const text = value.trim();
+  const text = value
+    .trim()
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*-\s*/g, "-");
   if (/^\d{4}-\d{2}-\d{2}$/.test(text))
     return dateInput.safeParse(text).success ? text : "";
   const numeric = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
@@ -166,186 +185,334 @@ function lines(items: PdfTextItem[]) {
     items: l.items.sort((a, b) => a.x - b.x),
   }));
 }
-/** Column starts come from actual page coordinates; rows are bounded by role/company anchors. */
+type Column = { field: Field; x: number; width: number; height: number };
+const inactiveListing =
+  /^(?:inactive(?: listing)?|closed listing|job (?:is )?(?:no longer available|unavailable)|listing (?:closed|inactive))$/i;
+const sourceStatusLabel =
+  /^(?:Applied|Interviewing|Interview|Assessment|Hired|Declined|Saved|Closed|Reviewed|Rejected|Withdrawn|Offer|Offered|Preparing|Ready|Inactive|Unavailable)$/i;
+const dateFragment =
+  /^(?:[\d/.,-]+|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+\d{1,2},?(?:\s+\d{2,4})?)?)$/i;
+
+function tableHeader(bands: ReturnType<typeof lines>, index: number) {
+  const band = bands[index];
+  const columns: Column[] = [];
+  for (let i = 0; i < band.items.length; i++) {
+    const item = band.items[i];
+    for (let count = 3; count >= 1; count--) {
+      const group = band.items.slice(i, i + count);
+      if (
+        group.length !== count ||
+        group.some(
+          (part, j) =>
+            j > 0 && part.x - (group[j - 1].x + group[j - 1].width) > 24,
+        )
+      )
+        continue;
+      const field = header(group.map((part) => part.text).join(" "));
+      if (!field) continue;
+      columns.push({
+        field,
+        x: item.x,
+        width: group.at(-1)!.x + group.at(-1)!.width - item.x,
+        height: item.height,
+      });
+      i += count - 1; // Keep the start of multiword headings, not the last matching word.
+      break;
+    }
+  }
+  let bottom = band.y;
+  const below = bands[index + 1];
+  for (const item of band.items) {
+    if (
+      !/^(?:Date|Application|Job)$/i.test(item.text.trim()) ||
+      !below ||
+      below.y - band.y > Math.max(18, item.height * 1.8)
+    )
+      continue;
+    const suffix = below.items.find(
+      (part) =>
+        Math.abs(part.x - item.x) < 24 && header(`${item.text} ${part.text}`),
+    );
+    const field = suffix && header(`${item.text} ${suffix.text}`);
+    if (field && suffix && !columns.some((c) => c.field === field)) {
+      columns.push({
+        field,
+        x: item.x,
+        width: Math.max(item.width, suffix.width),
+        height: item.height,
+      });
+      bottom = below.y;
+    }
+  }
+  if (
+    !columns.some((c) => c.field === "company") ||
+    !columns.some((c) => c.field === "title") ||
+    columns.length < 3
+  )
+    return null;
+  return {
+    columns: [
+      ...new Map(columns.map((column) => [column.field, column])).values(),
+    ].sort((a, b) => a.x - b.x),
+    bottom,
+  };
+}
+
+function cellColumn(item: PdfTextItem, columns: Column[]): Field | undefined {
+  const date = columns.find((c) => c.field === "applied_on");
+  const location = columns.find((c) => c.field === "location");
+  const status = columns.find((c) => c.field === "source_status");
+  const role = columns.find((c) => c.field === "title");
+  const text = item.text.trim();
+  // Compact, centered metadata may begin left of its heading. Keep its geometric
+  // neighborhood as a guard so a company named "Applied" is never moved to Status.
+  if (
+    date &&
+    item.x > (role ? (role.x + role.width + date.x) / 2 : date.x - 60) &&
+    item.x < (location?.x ?? status?.x ?? date.x + 140) &&
+    (parseAppliedDate(text) ||
+      (/^[\d/\s.,-]+$/.test(text) && /[/.,-]/.test(text)))
+  )
+    return "applied_on";
+  if (
+    status &&
+    item.x > (location?.x ?? status.x - 100) &&
+    (sourceStatusLabel.test(text) ||
+      item.x >= status.x - Math.max(24, status.width))
+  )
+    return "source_status";
+  const column = [...columns].reverse().find((c) => item.x >= c.x - 8);
+  if (
+    column?.field === "applied_on" &&
+    location &&
+    !dateFragment.test(text) &&
+    item.x + item.width / 2 > (date!.x + date!.width + location.x) / 2
+  )
+    return "location";
+  return column?.field;
+}
+
+/** Assign all five columns to shared row bands before normalizing any cell. */
 export function parseTracker(
   pages: PdfPage[],
   fingerprint: string,
 ): ImportRow[] {
   const rows: ImportRow[] = [];
-  let columns: { field: Field; x: number }[] = [];
+  let columns: Column[] = [];
   for (const page of pages) {
     const bands = lines(page.items);
-    const firstHeaderY = bands.find(
-      (band) =>
-        band.items.some((item) => header(item.text) === "company") &&
-        band.items.some((item) => header(item.text) === "title"),
-    )?.y;
-    let current:
-      | {
-          fields: Record<Field, string[]>;
-          y: number;
-          lastY: number;
-          inactive: boolean;
-        }
-      | undefined;
     let ordinal = 0;
-    const finish = () => {
-      if (!current) return;
-      const get = (field: Field) =>
-        current!.fields[field].join(" ").replace(/\s+/g, " ").trim();
-      const company = get("company"),
-        title = get("title"),
-        rawDate = get("applied_on"),
-        source_status = get("source_status");
-      if (!company && !title) {
-        current = undefined;
-        return;
+    const headers = bands.map((_, index) => tableHeader(bands, index));
+    const firstHeader = headers.findIndex(Boolean);
+    let body: {
+      y: number;
+      cells: Partial<Record<Field, PdfTextItem[]>>;
+      inactive: boolean;
+    }[] = [];
+    const flush = () => {
+      if (!body.length) return;
+      type Group = { top: number; bottom: number; bands: typeof body };
+      const groups: Group[] = [];
+      // Company/role baselines define shared rows. Metadata is attached only after
+      // every row boundary is known, including when it appears before the title.
+      for (const band of body) {
+        if (!band.cells.company?.length && !band.cells.title?.length) continue;
+        const previous = groups.at(-1);
+        const lineHeight = Math.max(
+          8,
+          ...Object.values(band.cells)
+            .flat()
+            .map((item) => item.height),
+        );
+        const hasBoth =
+          !!band.cells.company?.length && !!band.cells.title?.length;
+        const hasMetadata =
+          !!band.cells.applied_on?.length || !!band.cells.source_status?.length;
+        if (
+          !previous ||
+          band.y - previous.bottom > lineHeight * 1.8 ||
+          (hasBoth && hasMetadata && band.y - previous.top > lineHeight * 0.8)
+        )
+          groups.push({ top: band.y, bottom: band.y, bands: [] });
+        else previous.bottom = band.y;
       }
-      const normalized = normalizeExtractedRow({
-        company,
-        title,
-        location: get("location"),
-        applied_on: rawDate,
-        source_status,
-      });
-      const { applied_on, status } = normalized;
-      const warnings: string[] = [];
-      if (current.inactive)
-        warnings.push(
-          "Listing inactive; this does not indicate applicant rejection",
+      // A dated/status-bearing table row with no identity must remain visible as
+      // invalid, rather than donating its metadata to a neighboring application.
+      for (const band of body) {
+        if (
+          !band.cells.applied_on?.length ||
+          groups.some(
+            (group) => band.y >= group.top - 24 && band.y <= group.bottom + 24,
+          )
+        )
+          continue;
+        const hasStatus = body.some(
+          (other) =>
+            other.cells.source_status?.length &&
+            Math.abs(other.y - band.y) <= 20,
         );
-      for (const [name, value] of [
-        ["Company", company],
-        ["Job title", title],
-        ["Location", get("location")],
-      ])
-        if (/(?:…|\.{3})/.test(value))
-          warnings.push(
-            `${name} is truncated; preserve or correct from a known source`,
-          );
-      if (!applied_on)
-        warnings.push("Missing or ambiguous application date; enter manually");
-      if (!status)
-        warnings.push(
-          `Review source status: ${source_status || "missing"}. Closed/inactive is not rejection; Reviewed is not Interview`,
+        if (hasStatus) groups.push({ top: band.y, bottom: band.y, bands: [] });
+      }
+      groups.sort((a, b) => a.top - b.top);
+      for (const band of body) {
+        const group = groups.reduce<Group | undefined>(
+          (nearest, candidate) =>
+            !nearest ||
+            Math.abs(band.y - (candidate.top + candidate.bottom) / 2) <
+              Math.abs(band.y - (nearest.top + nearest.bottom) / 2)
+              ? candidate
+              : nearest,
+          undefined,
         );
-      if (/hired/i.test(source_status))
-        warnings.push("Hired maps to Offer; confirm this mapping");
-      rows.push(
-        importDraftSchema.parse({
-          id: crypto.randomUUID(),
-          import_key: `${fingerprint}:${page.number}:${++ordinal}`,
-          ...normalized,
-          job_id: null,
-          reviewed: false,
-          selected: true,
-          warnings,
-          page: page.number,
-        }),
-      );
-      current = undefined;
-    };
-    for (const band of bands) {
-      if (firstHeaderY !== undefined && band.y < firstHeaderY) continue;
-      // pdf.js may split multiword headings into separate items.
-      const candidates = band.items
-        .map((item, index) => {
-          for (let length = 3; length >= 1; length--) {
-            const group = band.items.slice(index, index + length);
-            if (
-              group.length !== length ||
-              group.some(
-                (g, j) =>
-                  j > 0 && g.x - (group[j - 1].x + group[j - 1].width) > 24,
-              )
+        if (group && band.y >= group.top - 24 && band.y <= group.bottom + 48)
+          group.bands.push(band);
+      }
+      for (const group of groups) {
+        const get = (field: Field) => {
+          const items = group.bands
+            .flatMap((band) => band.cells[field] || [])
+            .sort((a, b) => a.y - b.y || a.x - b.x);
+          return items
+            .filter(
+              (item, index) =>
+                !items
+                  .slice(0, index)
+                  .some(
+                    (other) =>
+                      other.text === item.text &&
+                      Math.abs(other.x - item.x) < 1 &&
+                      Math.abs(other.y - item.y) < 1,
+                  ),
             )
-              continue;
-            const field = header(group.map((g) => g.text).join(" "));
-            if (field) return { field, x: item.x };
-          }
-          return null;
-        })
-        .filter((v): v is { field: Field; x: number } => !!v);
-      if (
-        new Set(candidates.map((c) => c.field)).size >= 3 &&
-        candidates.some((c) => c.field === "title") &&
-        candidates.some((c) => c.field === "company")
-      ) {
-        finish();
-        columns = [
-          ...new Map(candidates.map((c) => [c.field, c])).values(),
-        ].sort((a, b) => a.x - b.x);
+            .map((item) => item.text)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+        };
+        const normalized = normalizeExtractedRow({
+          company: get("company"),
+          title: get("title"),
+          location: get("location"),
+          applied_on: get("applied_on"),
+          source_status: get("source_status"),
+        });
+        const warnings: string[] = [];
+        if (group.bands.some((band) => band.inactive))
+          warnings.push("Listing inactive; applicant outcome unknown");
+        for (const [label, value] of [
+          ["Company", normalized.company],
+          ["Job title", normalized.title],
+          ["Location", normalized.location],
+        ])
+          if (/(?:…|\.{3})/.test(value)) warnings.push(`${label} is truncated`);
+        if (/hired/i.test(normalized.source_status))
+          warnings.push("Hired maps to Offer");
+        rows.push(
+          importDraftSchema.parse({
+            ...normalized,
+            id: crypto.randomUUID(),
+            import_key: `${fingerprint}:${page.number}:${++ordinal}`,
+            job_id: null,
+            selected: true,
+            reviewed: false,
+            warnings,
+            page: page.number,
+          }),
+        );
+      }
+      body = [];
+    };
+    let headerBottom = -Infinity;
+    for (const [index, band] of bands.entries()) {
+      if (firstHeader >= 0 && index < firstHeader) continue;
+      const heading = headers[index];
+      if (heading) {
+        flush();
+        columns = heading.columns;
+        headerBottom = heading.bottom;
         continue;
       }
-      if (!columns.length || band.y > page.height - 32 || band.y < 24) continue;
-      const all = band.items.map((i) => i.text).join(" ");
+      if (
+        !columns.length ||
+        band.y <= headerBottom + 2 ||
+        band.y < 24 ||
+        band.y > page.height - 32
+      )
+        continue;
+      const text = band.items
+        .map((item) => item.text)
+        .join(" ")
+        .trim();
       if (
         /https?:\/\/|^\d+\s*(?:\/|of)\s*\d+$|^(?:Handshake|Home|Jobs|My jobs|Career center|Applications|Job tracker|Page \d+)$/i.test(
-          all.trim(),
+          text,
         )
-      ) {
-        finish();
+      )
         continue;
-      }
-      const cells: Partial<Record<Field, string[]>> = {};
-      const inactive =
-        /^(?:inactive(?: listing)?|closed listing|job (?:is )?(?:no longer available|unavailable)|listing (?:closed|inactive))$/i;
+      const cells: Partial<Record<Field, PdfTextItem[]>> = {};
+      let inactive = false;
       for (const item of band.items) {
-        const column = [...columns].reverse().find((c) => item.x >= c.x - 8);
+        const field = cellColumn(item, columns);
         if (
-          current &&
-          band.y > current.y + 4 &&
-          inactive.test(item.text.trim()) &&
-          column?.field !== "source_status"
+          inactiveListing.test(item.text.trim()) &&
+          field !== "source_status"
         ) {
-          current.inactive = true;
+          inactive = true;
           continue;
         }
-        if (column) (cells[column.field] ||= []).push(item.text);
+        if (field) (cells[field] ||= []).push(item);
       }
-      // Each table row starts at a company or role baseline, with dates/status as corroboration.
-      const starts =
-        !!(cells.company?.length || cells.title?.length) &&
-        (!!cells.applied_on?.length ||
-          !!cells.source_status?.length ||
-          (!!cells.company?.length && !!cells.title?.length));
-      if (
-        starts &&
-        current &&
-        band.y - current.y > 8 &&
-        (cells.applied_on?.length ||
-          cells.source_status?.length ||
-          band.y - current.lastY > 24)
-      )
-        finish();
-      if (!current) {
-        if (!starts) continue;
-        current = {
-          y: band.y,
-          lastY: band.y,
-          inactive: false,
-          fields: {
-            company: [],
-            title: [],
-            applied_on: [],
-            location: [],
-            source_status: [],
-          },
-        };
-      }
-      if (band.y - current.lastY > 64) {
-        finish();
-        continue;
-      }
-      current.lastY = band.y;
-      for (const field of Object.keys(cells) as Field[])
-        current.fields[field].push(...cells[field]!);
+      body.push({ y: band.y, cells, inactive });
     }
-    finish();
+    flush();
   }
   if (rows.length > 500)
     throw new Error("Import no more than 500 rows per session.");
   return rows;
+}
+
+/** Informational extraction warnings never participate in persistence validation. */
+export function reviewImportRow(row: ImportRow) {
+  const validation = importFieldsSchema.safeParse(row);
+  const errors = validation.success
+    ? []
+    : validation.error.issues.map((issue) => issue.message);
+  const warnings = row.warnings.filter(
+    (warning) =>
+      !/truncated|Missing or ambiguous|Review source status/i.test(warning),
+  );
+  for (const [label, value] of [
+    ["Company", row.company],
+    ["Job title", row.title],
+    ["Location", row.location],
+  ])
+    if (/(?:…|\.{3})/.test(value)) warnings.push(`${label} is truncated`);
+  return {
+    errors,
+    warnings: [...new Set(warnings)],
+    eligible: errors.length === 0,
+    needsAttention: errors.length > 0,
+  };
+}
+export function prepareSelectedImports(rows: ImportRow[]) {
+  const ready: {
+    index: number;
+    row: ImportRow;
+    data: z.infer<typeof finalizedImportRowSchema>;
+  }[] = [];
+  const skipped: { index: number; row: ImportRow; errors: string[] }[] = [];
+  rows.forEach((row, index) => {
+    if (!row.selected) return;
+    const result = finalizedImportRowSchema.safeParse(row);
+    if (result.success) ready.push({ index, row, data: result.data });
+    else
+      skipped.push({
+        index,
+        row,
+        errors: result.error.issues.map((issue) => issue.message),
+      });
+  });
+  return { ready, skipped };
 }
 const normal = (s: string) => s.trim().toLowerCase();
 export function matchingApplication(

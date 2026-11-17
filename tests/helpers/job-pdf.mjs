@@ -75,16 +75,32 @@ export function trackerPdf(
       ],
     ],
   ],
+  offsetLayout = false,
 ) {
   const xs = [40, 190, 380, 495, 610];
   const streams = pages.map((rows) =>
     [
       [40, 755, "Handshake"],
       ...["Company", "Role", "Date applied", "Location", "Status"].map(
-        (text, index) => [xs[index], 710, text],
+        (text, index) => [
+          xs[index],
+          710,
+          offsetLayout && index === 2 ? "Date" : text,
+        ],
       ),
+      ...(offsetLayout ? [[380, 698, "applied"]] : []),
       ...rows.flatMap((row, index) =>
-        row.map((text, column) => [xs[column], 670 - index * 60, text]),
+        row.flatMap((text, column) => {
+          if (!offsetLayout) return [[xs[column], 670 - index * 60, text]];
+          const x = xs[column] + [0, 0, -30, -25, -26][column];
+          const y = 670 - index * 60 + [0, 2, 9, -2, -6][column];
+          if (column === 2 && /^\d{2}\/\d{2}\/\d{2}$/.test(text))
+            return [
+              [x, y, text.slice(0, -2)],
+              [x + 32, y, text.slice(-2)],
+            ];
+          return [[x, y, text]];
+        }),
       ),
       [40, 20, "https://app.joinhandshake.com/myjobs"],
       [660, 20, "1 / 2"],
@@ -120,3 +136,44 @@ export function trackerPdf(
     )}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(result);
 }
+
+// Representative synthetic tracker rows, not the user's unavailable Handshake exports.
+export const offsetTrackerRows = [
+  [
+    [
+      "Example Labs...",
+      "Engineering Intern...",
+      "11/10/26",
+      "New York...",
+      "Applied",
+    ],
+    [
+      "Design Studio...",
+      "Product Designer...",
+      "11/02/26",
+      "Boston...",
+      "Interviewing",
+    ],
+    [
+      "Research Group...",
+      "Research Assistant...",
+      "03/27/26",
+      "Remote...",
+      "Saved",
+    ],
+  ],
+  [
+    ["Offer Studio...", "Developer...", "10/25/26", "Chicago...", "Hired"],
+    ["Review Studio...", "Analyst...", "10/21/26", "Remote...", "Declined"],
+    [
+      "Closed Studio...",
+      "Finance Intern...",
+      "10/20/26",
+      "Seattle...",
+      "Closed",
+    ],
+    ["Missing Date...", "Marketing Intern...", "", "Remote...", "Applied"],
+    ["", "Operations Intern...", "10/18/26", "Remote...", "Applied"],
+    ["Missing Role...", "", "10/17/26", "Remote...", "Applied"],
+  ],
+];

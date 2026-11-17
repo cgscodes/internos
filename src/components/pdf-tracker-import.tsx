@@ -6,11 +6,10 @@ import { statuses } from "@/lib/models";
 import { PDF_LIMITS } from "@/lib/pdf/job-fields";
 import {
   importFieldsSchema,
-  importRowSchema,
-  importValidationMessages,
+  prepareSelectedImports,
+  reviewImportRow,
   matchingApplication,
   parseTracker,
-  rowValidation,
   type ImportRow,
 } from "@/lib/pdf/tracker";
 
@@ -20,6 +19,11 @@ export function PdfTrackerImport() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [messages, setMessages] = useState<string[]>([]);
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  const [progress, setProgress] = useState<{
+    completed: number;
+    total: number;
+  } | null>(null);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
   const update = (id: string, patch: Partial<ImportRow>) =>
@@ -32,10 +36,15 @@ export function PdfTrackerImport() {
   const duplicates = rows.map(duplicate);
   const valid = rows.filter((row) => importFieldsSchema.safeParse(row).success);
   const selected = rows.filter((row) => row.selected);
+  const eligibleSelected = selected.filter(
+    (row) => reviewImportRow(row).eligible,
+  );
+  const { ready } = prepareSelectedImports(rows);
   async function extract(files: File[]) {
     setBusy(true);
     setError("");
     setMessages([]);
+    setProgress(null);
     const controller = new AbortController();
     abort.current = controller;
     const timer = setTimeout(() => controller.abort(), 120000);
@@ -117,52 +126,59 @@ export function PdfTrackerImport() {
       setError("Select at least one row to import.");
       return;
     }
-    const invalid = rows.flatMap((row, index) => {
-      if (!row.selected) return [];
-      const result = rowValidation(row);
-      return result.success
-        ? []
-        : importValidationMessages(result.error.issues, index + 1);
-    });
-    if (invalid.length) {
-      setError(invalid.join(" "));
+    const { ready, skipped } = prepareSelectedImports(rows);
+    const outcomes = skipped.map(
+      ({ index, row, errors }) =>
+        `Row ${index + 1} · ${row.company || "Unknown company"} · ${row.title || "Unknown role"}: not imported — ${errors.join(" ")}`,
+    );
+    setMessages(outcomes);
+    if (!ready.length) {
+      setError(
+        "No selected rows are eligible and confirmed. Correct the rows marked Needs attention or confirm your selection.",
+      );
       return;
     }
-    const finalized = selected.map((row) => importRowSchema.parse(row));
+    setProgress({ completed: 0, total: ready.length });
     setBusy(true);
     const controller = new AbortController();
     abort.current = controller;
     const timer = setTimeout(() => controller.abort(), 120000);
     try {
-      const response = await fetch("/api/import/applications", {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: finalized }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Import failed");
-      const complete = new Set<string>();
-      const messages: string[] = [];
-      for (const item of result.results as {
-        row: number;
-        outcome: string;
-        error?: string;
-      }[]) {
-        const row = selected[item.row];
-        if (item.outcome !== "error") complete.add(row.id);
-        messages.push(
-          `Row ${rows.findIndex((draft) => draft.id === row.id) + 1} · ${row.company} · ${row.title}: ${item.error || item.outcome}`,
+      // Bounded chunks provide actual completed-row progress and retain successes
+      // if a later request fails. The existing RPC remains atomic per application.
+      for (let offset = 0; offset < ready.length; offset += 20) {
+        const chunk = ready.slice(offset, offset + 20);
+        const response = await fetch("/api/import/applications", {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: chunk.map((item) => item.data) }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Import failed");
+        const complete = new Set<string>();
+        for (const item of result.results as {
+          row: number;
+          outcome: string;
+          error?: string;
+        }[]) {
+          const { row, index } = chunk[item.row];
+          if (item.outcome !== "error") complete.add(row.id);
+          outcomes.push(
+            `Row ${index + 1} · ${row.company} · ${row.title}: ${item.error || item.outcome}`,
+          );
+        }
+        setRows((previous) =>
+          previous.map((row) =>
+            complete.has(row.id) ? { ...row, selected: false } : row,
+          ),
         );
+        setMessages([...outcomes]);
+        setProgress({ completed: offset + chunk.length, total: ready.length });
       }
-      setRows((previous) =>
-        previous.map((row) =>
-          complete.has(row.id) ? { ...row, selected: false } : row,
-        ),
-      );
-      setMessages(messages);
       await reload();
     } catch (error) {
+      await reload().catch(() => {});
       setError(
         controller.signal.aborted
           ? "Import timed out. Refresh your workspace before retrying. Confirmed rows are safe to retry."
@@ -194,17 +210,58 @@ export function PdfTrackerImport() {
       </label>
       <p>
         Up to 10 PDFs, 10 MB each, 50 MB total · 40 pages per file · 500 rows.
-        Review every row. No applications are saved until you confirm.
+        Truncated text can be imported as shown. Check the selection and confirm
+        before saving.
       </p>
-      {busy && <p role="status">Processing import…</p>}
+      {busy && (
+        <p role="status">
+          {progress
+            ? `Importing ${progress.completed} of ${progress.total} eligible applications…`
+            : "Processing import…"}
+        </p>
+      )}
+      {progress && (
+        <label>
+          Application import progress
+          <progress
+            aria-label="Application import progress"
+            max={progress.total}
+            value={progress.completed}
+          />
+          {progress.completed} / {progress.total}
+        </label>
+      )}
       {rows.length > 0 && (
         <>
           <p role="status">
             Detected {rows.length} · Valid {valid.length} · Duplicate{" "}
             {duplicates.filter(Boolean).length} · Invalid{" "}
-            {rows.length - valid.length} · Selected {selected.length}
+            {rows.length - valid.length} · Selected {selected.length} · Ready to
+            import {ready.length}
           </p>
           <div className="form-actions">
+            <Button
+              disabled={busy}
+              variant="outline"
+              onClick={() =>
+                setRows((previous) =>
+                  previous.map((row) => ({ ...row, selected: true })),
+                )
+              }
+            >
+              Select All
+            </Button>
+            <Button
+              disabled={busy}
+              variant="outline"
+              onClick={() =>
+                setRows((previous) =>
+                  previous.map((row) => ({ ...row, selected: false })),
+                )
+              }
+            >
+              Deselect All
+            </Button>
             <Button
               disabled={busy}
               variant="outline"
@@ -236,12 +293,67 @@ export function PdfTrackerImport() {
               Skip duplicates
             </Button>
           </div>
+          <label>
+            Review filter
+            <select
+              disabled={busy}
+              value={attentionOnly ? "attention" : "all"}
+              onChange={(event) =>
+                setAttentionOnly(event.target.value === "attention")
+              }
+            >
+              <option value="all">All rows</option>
+              <option value="attention">Needs attention</option>
+            </select>
+          </label>
+          <label>
+            Job type for selected rows
+            <select
+              disabled={busy}
+              value=""
+              onChange={(event) => {
+                const type = event.target.value as ImportRow["type"];
+                if (type)
+                  setRows((previous) =>
+                    previous.map((row) =>
+                      row.selected ? { ...row, type, reviewed: false } : row,
+                    ),
+                  );
+              }}
+            >
+              <option value="">Choose and apply a type</option>
+              {["Internship", "Co-op", "Graduate"].map((type) => (
+                <option key={type}>{type}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              disabled={busy || !eligibleSelected.length}
+              checked={
+                eligibleSelected.length > 0 &&
+                eligibleSelected.every((row) => row.reviewed)
+              }
+              onChange={(event) => {
+                const reviewed = event.target.checked;
+                setRows((previous) =>
+                  previous.map((row) =>
+                    row.selected && reviewImportRow(row).eligible
+                      ? { ...row, reviewed }
+                      : row,
+                  ),
+                );
+              }}
+            />
+            Confirm selected eligible rows
+          </label>
           <fieldset disabled={busy} className="bulk-review-fields">
             <div className="flow-table-wrap">
               <table className="bulk-review-table">
                 <caption>
-                  Review extracted applications. Confirm status mappings and
-                  field accuracy per row.
+                  Review extracted applications. Warnings do not block import.
+                  Rows needing attention stay available for correction.
                 </caption>
                 <thead>
                   <tr>
@@ -254,7 +366,8 @@ export function PdfTrackerImport() {
                       "Imported status",
                       "Job type",
                       "Existing-record match",
-                      "Validation warnings",
+                      "Warnings and errors",
+                      "Import eligibility",
                       "Reviewed",
                       "Remove",
                     ].map((label) => (
@@ -266,7 +379,8 @@ export function PdfTrackerImport() {
                 </thead>
                 <tbody>
                   {rows.map((row, index) => {
-                    const validation = importFieldsSchema.safeParse(row);
+                    const review = reviewImportRow(row);
+                    if (attentionOnly && !review.needsAttention) return null;
                     return (
                       <tr key={row.id}>
                         <td>
@@ -383,21 +497,31 @@ export function PdfTrackerImport() {
                           </small>
                         </td>
                         <td>
-                          {row.warnings.map((warning) => (
-                            <p key={warning}>{warning}</p>
-                          ))}
-                          {!validation.success && (
-                            <p className="error">
-                              {importValidationMessages(
-                                validation.error.issues,
-                                index + 1,
-                              ).join(" ")}
-                            </p>
+                          {review.warnings.length > 0 && (
+                            <details>
+                              <summary>
+                                {review.warnings.length} warnings
+                              </summary>
+                              <ul>
+                                {review.warnings.map((warning) => (
+                                  <li key={warning}>{warning}</li>
+                                ))}
+                              </ul>
+                            </details>
                           )}
-                          <small>
-                            Page {row.page}. Extraction warnings remain for
-                            review after corrections.
-                          </small>
+                          {review.errors.map((message) => (
+                            <p className="error" key={message}>
+                              Row {index + 1}: {message}
+                            </p>
+                          ))}
+                          <small>Page {row.page}</small>
+                        </td>
+                        <td>
+                          {!review.eligible
+                            ? "Needs attention"
+                            : row.reviewed
+                              ? "Ready to import"
+                              : "Needs confirmation"}
                         </td>
                         <td>
                           <input
@@ -431,15 +555,8 @@ export function PdfTrackerImport() {
               </table>
             </div>
           </fieldset>
-          <Button
-            disabled={
-              busy ||
-              !selected.length ||
-              selected.some((row) => !rowValidation(row).success)
-            }
-            onClick={() => void save()}
-          >
-            Import {selected.length} selected applications
+          <Button disabled={busy || !ready.length} onClick={() => void save()}>
+            Import Selected
           </Button>
         </>
       )}
