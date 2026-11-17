@@ -238,7 +238,7 @@ test("bulk import API enforces authentication, review validation, origin and per
     company: "API Studio",
     title: "Intern",
     location: "Remote",
-    applied_on: "2026-11-01",
+    applied_on: "11/01/26",
     source_status: "Applied",
     status: "Applied",
     type: "Internship",
@@ -262,6 +262,13 @@ test("bulk import API enforces authentication, review validation, origin and per
           job_id: crypto.randomUUID(),
         },
         { ...valid, reviewed: false },
+        {
+          ...valid,
+          applied_on: "",
+          status: "Mystery",
+          type: "",
+          reviewed: "true",
+        },
       ],
     },
   });
@@ -271,9 +278,18 @@ test("bulk import API enforces authentication, review validation, origin and per
     "created",
     "error",
     "error",
+    "error",
   ]);
+  expect(result.results[2].error).toContain("Confirm this row");
+  expect(result.results[3].error).toContain("Job type needs confirmation");
+  expect(result.results[3].error).toContain("Status needs confirmation");
+  expect(result.results[3].error).toContain("Enter a valid application date");
+  expect(result.results[3].row).toBe(3);
+  expect(result.results[3].error).not.toContain("Invalid option");
   const workspace = await (await page.request.get("/api/workspace")).json();
   expect(workspace.applications).toHaveLength(1);
+  expect(workspace.applications[0].applied_on).toBe("2026-11-01");
+  expect(workspace.events).toHaveLength(1);
   expect(
     workspace.companies.some(
       (c: { name: string }) => c.name === "Failed Studio",
@@ -293,4 +309,99 @@ test("bulk import API enforces authentication, review validation, origin and per
   } finally {
     await anonymous.dispose();
   }
+});
+
+test("bulk drafts normalize short dates, explain missing fields, and preserve edits and boolean confirmations per row", async ({
+  page,
+}) => {
+  const { trackerPdf } = await import("../helpers/job-pdf.mjs");
+  await page.goto("/discover");
+  await page.getByRole("button", { name: "Import PDF", exact: true }).click();
+  await page.getByLabel("Import mode").selectOption("tracker");
+  await page.getByLabel("Application tracker PDFs").setInputFiles({
+    name: "short-years.pdf",
+    mimeType: "application/pdf",
+    buffer: trackerPdf([
+      [
+        ["First Studio", "Intern", "11/10/26", "Remote", "applied"],
+        ["Second Studio", "Research", "", "Boston", "Reviewed"],
+      ],
+    ]),
+  });
+  const dialog = page.getByRole("dialog");
+  await expect(
+    page.getByLabel("applied_on row 1", { exact: true }),
+  ).toHaveValue("2026-11-10");
+  await expect(page.getByLabel("Status row 1", { exact: true })).toHaveValue(
+    "Applied",
+  );
+  await expect(page.getByLabel("Job type row 1", { exact: true })).toHaveValue(
+    "",
+  );
+  await expect(dialog).toContainText("Unknown / Not specified");
+  await expect(
+    page.getByLabel("Confirm review row 1", { exact: true }),
+  ).not.toBeChecked();
+  await expect(dialog).toContainText("Row 1: Job type needs confirmation");
+  await expect(dialog).toContainText("Row 2: Enter a valid application date");
+  await expect(dialog).toContainText("Row 2: Status needs confirmation");
+  await expect(dialog).not.toContainText("Invalid option");
+  await expect(dialog).not.toContainText("expected true");
+  await page.getByLabel("title row 1", { exact: true }).fill("Corrected role");
+  await page
+    .getByLabel("Job type row 1", { exact: true })
+    .selectOption("Co-op");
+  await page.getByLabel("Confirm review row 1", { exact: true }).check();
+  await page.getByLabel("applied_on row 2", { exact: true }).fill("2026-11-09");
+  await page
+    .getByLabel("Status row 2", { exact: true })
+    .selectOption("Rejected");
+  await page
+    .getByLabel("Job type row 2", { exact: true })
+    .selectOption("Graduate");
+  await page.getByLabel("Confirm review row 2", { exact: true }).check();
+  await expect(page.getByLabel("title row 1", { exact: true })).toHaveValue(
+    "Corrected role",
+  );
+  await expect(
+    page.getByLabel("Confirm review row 1", { exact: true }),
+  ).toBeChecked();
+  // Editing one row requires its own renewed confirmation, without changing another row.
+  await page.getByLabel("location row 1", { exact: true }).fill("New York");
+  await expect(
+    page.getByLabel("Confirm review row 1", { exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByLabel("Confirm review row 2", { exact: true }),
+  ).toBeChecked();
+  const submit = page.getByRole("button", {
+    name: "Import 2 selected applications",
+    exact: true,
+  });
+  await expect(submit).toBeDisabled();
+  await page.getByLabel("Confirm review row 1", { exact: true }).check();
+  const request = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/api/import/applications") &&
+      request.method() === "POST",
+  );
+  await submit.click();
+  const payload = (await request).postDataJSON();
+  expect(
+    payload.rows.every((row: { reviewed: unknown }) => row.reviewed === true),
+  ).toBeTruthy();
+  expect(
+    payload.rows.map((row: { applied_on: string }) => row.applied_on),
+  ).toEqual(["2026-11-10", "2026-11-09"]);
+  await expect(
+    page.getByRole("status").filter({ hasText: "created" }),
+  ).toBeVisible();
+  const workspace = await (await page.request.get("/api/workspace")).json();
+  expect(workspace.applications).toHaveLength(2);
+  expect(
+    workspace.applications.find(
+      (app: { company: string }) => app.company === "Second Studio",
+    ).source_status,
+  ).toBe("Reviewed");
+  expect(workspace.events).toHaveLength(2);
 });

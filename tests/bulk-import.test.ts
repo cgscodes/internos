@@ -7,6 +7,12 @@ import {
   parseAppliedDate,
   rowValidation,
   matchingApplication,
+  extractedPdfRowSchema,
+  importDraftSchema,
+  finalizedImportRowSchema,
+  importFieldsSchema,
+  normalizeExtractedRow,
+  importValidationMessages,
 } from "../src/lib/pdf/tracker.ts";
 import {
   currentApplicationFlow,
@@ -72,13 +78,7 @@ test("dates and status mappings never infer dates, rejection from closed or inte
   ])
     assert.equal(mapHandshakeStatus(status), "");
   assert.equal(mapHandshakeStatus("Hired"), "Offer");
-  for (const date of [
-    "Nov 10",
-    "11/10/26",
-    "2026-02-30",
-    "Feb 30, 2026",
-    "yesterday",
-  ])
+  for (const date of ["Nov 10", "2026-02-30", "Feb 30, 2026", "yesterday"])
     assert.equal(parseAppliedDate(date), "");
 });
 test("import RPC creates ordinary applications/history atomically, reimports are idempotent after terminal status, and row failures are isolated", async () => {
@@ -92,7 +92,12 @@ test("import RPC creates ordinary applications/history atomically, reimports are
       `set role authenticated;select set_config('request.jwt.claim.sub','${alice}',false)`,
     );
     const rows = await extracted();
-    const corrected = { ...rows[0], reviewed: true, type: "Internship" };
+    const corrected = finalizedImportRowSchema.parse({
+      ...rows[0],
+      applied_on: "11/10/26",
+      reviewed: true,
+      type: "Internship",
+    });
     const save = async (row: unknown) =>
       (
         await db.query<{ result: { id: string; outcome: string } }>(
@@ -318,4 +323,125 @@ test("inactive source statuses are preserved verbatim for manual mapping", async
   assert.equal(rows.length, 1);
   assert.equal(rows[0].source_status, "Inactive");
   assert.equal(rows[0].status, "");
+});
+
+test("two-digit Handshake dates normalize to ISO without accepting impossible dates or inventing missing ones", async () => {
+  for (const [source, iso] of [
+    ["11/10/26", "2026-11-10"],
+    ["2/29/24", "2024-02-29"],
+    ["01/01/00", "2000-01-01"],
+    ["11/10/2026", "2026-11-10"],
+  ])
+    assert.equal(parseAppliedDate(source), iso);
+  for (const source of [
+    "",
+    "2/29/26",
+    "2/30/24",
+    "13/01/26",
+    "11/00/26",
+    "11/10",
+    "11/10/026",
+  ])
+    assert.equal(parseAppliedDate(source), "");
+  const rows = parseTracker(
+    (
+      await extractPdfLayout(
+        new Uint8Array(
+          trackerPdf([
+            [["Date Studio", "Intern", "11/10/26", "Remote", "aPpLiEd"]],
+          ]),
+        ),
+        undefined,
+        true,
+      )
+    ).pages,
+    hash,
+  );
+  assert.equal(rows[0].applied_on, "2026-11-10");
+  assert.equal(rows[0].source_applied_on, "11/10/26");
+  assert.equal(rows[0].status, "Applied");
+  assert.equal(rows[0].source_status, "aPpLiEd");
+});
+
+test("extracted rows and editable drafts allow uncertainty, while final records require explicit type, status, date and boolean review", async () => {
+  assert.ok(extractedPdfRowSchema.safeParse({}).success);
+  const row = (await extracted())[0];
+  const draft = importDraftSchema.parse({
+    ...row,
+    ...normalizeExtractedRow({
+      company: "Test",
+      title: "Role",
+      source_status: "Reviewed",
+    }),
+  });
+  assert.equal(draft.applied_on, "");
+  assert.equal(draft.type, "");
+  assert.equal(draft.status, "");
+  assert.equal(draft.reviewed, false);
+  assert.ok(importDraftSchema.safeParse(draft).success);
+  const invalid = finalizedImportRowSchema.safeParse(draft);
+  assert.equal(invalid.success, false);
+  if (!invalid.success) {
+    assert.deepEqual(
+      invalid.error.issues.map((issue) => issue.path[0]),
+      ["applied_on", "status", "type", "reviewed"],
+    );
+    assert.ok(
+      importValidationMessages(invalid.error.issues, 12).every((message) =>
+        message.startsWith("Row 12: "),
+      ),
+    );
+    assert.ok(
+      importValidationMessages(invalid.error.issues, 12).some((message) =>
+        message.includes("Job type needs confirmation"),
+      ),
+    );
+  }
+  const fields = {
+    ...draft,
+    applied_on: "11/10/26",
+    status: "Applied",
+    type: "Co-op",
+  };
+  assert.ok(importFieldsSchema.safeParse(fields).success); // valid fields do not require premature confirmation
+  for (const reviewed of [false, "true", "false", 1, undefined])
+    assert.equal(
+      finalizedImportRowSchema.safeParse({ ...fields, reviewed }).success,
+      false,
+    );
+  assert.equal(
+    importDraftSchema.safeParse({ ...draft, reviewed: "true" }).success,
+    false,
+  );
+  const final = finalizedImportRowSchema.parse({ ...fields, reviewed: true });
+  assert.equal(final.reviewed, true);
+  assert.equal(final.applied_on, "2026-11-10");
+  assert.equal(final.type, "Co-op");
+  assert.equal(
+    finalizedImportRowSchema.safeParse({ ...final, status: "applied" }).success,
+    false,
+  );
+  for (const status of [
+    "Saved",
+    "Preparing",
+    "Ready",
+    "Applied",
+    "Assessment",
+    "Interview",
+    "Offer",
+    "Rejected",
+    "Withdrawn",
+  ])
+    assert.equal(mapHandshakeStatus(` ${status.toUpperCase()} `), status);
+  for (const status of [
+    "Unknown",
+    "Reviewed",
+    "Declined",
+    "Closed",
+    "constructor",
+    "__proto__",
+  ])
+    assert.equal(mapHandshakeStatus(status), "");
+  assert.equal(normalizeExtractedRow({ type: "co-op" }).type, "Co-op");
+  assert.equal(normalizeExtractedRow({ type: "Full-time" }).type, "");
 });

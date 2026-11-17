@@ -1,56 +1,120 @@
 import { z } from "zod";
 import { dateInput, statuses } from "../validation/tracking.ts";
-import type { Application, Job } from "../models.ts";
+import type { Application } from "../models.ts";
 import type { PdfPage, PdfTextItem } from "./extract.ts";
 
-export const importRowSchema = z.object({
+const jobTypes = ["Internship", "Co-op", "Graduate"] as const;
+const identityFields = {
   id: z.uuid(),
   import_key: z.string().regex(/^[a-f0-9]{64}:\d+:\d+$/),
-  company: z.string().trim().min(1).max(120),
-  title: z.string().trim().min(1).max(160),
-  location: z.string().trim().max(160),
-  applied_on: dateInput.refine(Boolean, "Enter the actual application date"),
-  source_status: z.string().trim().max(120),
-  status: z.enum(statuses),
-  type: z.enum(["Internship", "Co-op", "Graduate"]),
   job_id: z.uuid().nullable(),
-  reviewed: z.literal(true),
-});
-export type ImportRow = Omit<
-  z.infer<typeof importRowSchema>,
-  "status" | "reviewed" | "type"
-> & {
-  status: Application["status"] | "";
-  type: Job["type"] | "";
-  reviewed: boolean;
-  selected: boolean;
-  warnings: string[];
-  page: number;
 };
+
+// Extraction is evidence, not a promise that a row can already be saved.
+export const extractedPdfRowSchema = z.object({
+  company: z.string().default(""),
+  title: z.string().default(""),
+  location: z.string().default(""),
+  applied_on: z.string().default(""),
+  source_status: z.string().default(""),
+  type: z.string().default(""),
+});
+export const importDraftSchema = extractedPdfRowSchema.extend({
+  ...identityFields,
+  source_applied_on: z.string().default(""),
+  status: z.union([z.enum(statuses), z.literal("")]),
+  type: z.union([z.enum(jobTypes), z.literal("")]),
+  reviewed: z.boolean().default(false),
+  selected: z.boolean().default(true),
+  warnings: z.array(z.string()).default([]),
+  page: z.int().positive(),
+});
+export type ImportRow = z.infer<typeof importDraftSchema>;
+
+// The API and client confirmation use the same strict persistence contract.
+export const finalizedImportRowSchema = z.object({
+  ...identityFields,
+  company: z
+    .string()
+    .trim()
+    .min(1, "Company is required.")
+    .max(120, "Company must be at most 120 characters."),
+  title: z
+    .string()
+    .trim()
+    .min(1, "Job title is required.")
+    .max(160, "Job title must be at most 160 characters."),
+  location: z
+    .string()
+    .trim()
+    .max(160, "Location must be at most 160 characters."),
+  applied_on: z
+    .string()
+    .trim()
+    .transform((value) => parseAppliedDate(value) || value)
+    .pipe(
+      z.iso.date({
+        error:
+          "Enter a valid application date; missing dates stay unknown until corrected.",
+      }),
+    ),
+  source_status: z.string().trim().max(120),
+  status: z.enum(statuses, {
+    error: "Status needs confirmation. Choose an InternOS status.",
+  }),
+  type: z.enum(jobTypes, {
+    error:
+      "Job type needs confirmation. Choose Internship, Co-op, or Graduate.",
+  }),
+  reviewed: z.literal(true, {
+    error: "Confirm this row after reviewing its fields and status mapping.",
+  }),
+});
+// Kept for existing import consumers; drafts must use importDraftSchema instead.
+export const importRowSchema = finalizedImportRowSchema;
+export const importFieldsSchema = finalizedImportRowSchema.omit({
+  reviewed: true,
+});
+
+export function normalizeExtractedRow(
+  input: z.input<typeof extractedPdfRowSchema>,
+) {
+  const raw = extractedPdfRowSchema.parse(input);
+  return {
+    ...raw,
+    source_applied_on: raw.applied_on,
+    applied_on: parseAppliedDate(raw.applied_on),
+    status: mapHandshakeStatus(raw.source_status),
+    type:
+      jobTypes.find(
+        (type) => type.toLowerCase() === raw.type.trim().toLowerCase(),
+      ) || "",
+  };
+}
+export function importValidationMessages(
+  issues: readonly { path: readonly PropertyKey[]; message: string }[],
+  rowNumber: number,
+) {
+  return issues.map((issue) => `Row ${rowNumber}: ${issue.message}`);
+}
+const statusMappings = new Map<string, Application["status"]>([
+  ...statuses.map((status) => [status.toLowerCase(), status] as const),
+  ["interviewing", "Interview"],
+  ["offered", "Offer"],
+  ["hired", "Offer"],
+]);
 export function mapHandshakeStatus(value: string): Application["status"] | "" {
-  return (
-    (
-      {
-        applied: "Applied",
-        interviewing: "Interview",
-        interview: "Interview",
-        assessment: "Assessment",
-        offered: "Offer",
-        offer: "Offer",
-        hired: "Offer",
-        rejected: "Rejected",
-        withdrawn: "Withdrawn",
-      } as Record<string, Application["status"]>
-    )[value.trim().toLowerCase()] || ""
-  );
+  return statusMappings.get(value.trim().toLowerCase()) || "";
 }
 export function parseAppliedDate(value: string) {
   const text = value.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(text))
     return dateInput.safeParse(text).success ? text : "";
-  const numeric = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const numeric = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (numeric) {
-    const iso = `${numeric[3]}-${numeric[1].padStart(2, "0")}-${numeric[2].padStart(2, "0")}`;
+    // Handshake short years explicitly denote 2000–2099; never use the current year.
+    const year = numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3];
+    const iso = `${year}-${numeric[1].padStart(2, "0")}-${numeric[2].padStart(2, "0")}`;
     return dateInput.safeParse(iso).success ? iso : "";
   }
   if (!/^[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}$/.test(text)) return "";
@@ -137,8 +201,14 @@ export function parseTracker(
         current = undefined;
         return;
       }
-      const applied_on = parseAppliedDate(rawDate),
-        status = mapHandshakeStatus(source_status);
+      const normalized = normalizeExtractedRow({
+        company,
+        title,
+        location: get("location"),
+        applied_on: rawDate,
+        source_status,
+      });
+      const { applied_on, status } = normalized;
       const warnings: string[] = [];
       if (current.inactive)
         warnings.push(
@@ -161,22 +231,18 @@ export function parseTracker(
         );
       if (/hired/i.test(source_status))
         warnings.push("Hired maps to Offer; confirm this mapping");
-      rows.push({
-        id: crypto.randomUUID(),
-        import_key: `${fingerprint}:${page.number}:${++ordinal}`,
-        company,
-        title,
-        location: get("location"),
-        applied_on,
-        source_status,
-        status,
-        type: "",
-        job_id: null,
-        reviewed: false,
-        selected: true,
-        warnings,
-        page: page.number,
-      });
+      rows.push(
+        importDraftSchema.parse({
+          id: crypto.randomUUID(),
+          import_key: `${fingerprint}:${page.number}:${++ordinal}`,
+          ...normalized,
+          job_id: null,
+          reviewed: false,
+          selected: true,
+          warnings,
+          page: page.number,
+        }),
+      );
       current = undefined;
     };
     for (const band of bands) {

@@ -5,6 +5,9 @@ import { Button } from "./ui/button";
 import { statuses } from "@/lib/models";
 import { PDF_LIMITS } from "@/lib/pdf/job-fields";
 import {
+  importFieldsSchema,
+  importRowSchema,
+  importValidationMessages,
   matchingApplication,
   parseTracker,
   rowValidation,
@@ -27,7 +30,7 @@ export function PdfTrackerImport() {
     matchingApplication(row, data.applications) ||
     data.imports?.find((receipt) => receipt.import_key === row.import_key);
   const duplicates = rows.map(duplicate);
-  const valid = rows.filter((row) => rowValidation(row).success);
+  const valid = rows.filter((row) => importFieldsSchema.safeParse(row).success);
   const selected = rows.filter((row) => row.selected);
   async function extract(files: File[]) {
     setBusy(true);
@@ -110,13 +113,22 @@ export function PdfTrackerImport() {
   async function save() {
     setError("");
     setMessages([]);
-    if (
-      !selected.length ||
-      selected.some((row) => !rowValidation(row).success)
-    ) {
-      setError("Correct all selected rows and confirm their review first.");
+    if (!selected.length) {
+      setError("Select at least one row to import.");
       return;
     }
+    const invalid = rows.flatMap((row, index) => {
+      if (!row.selected) return [];
+      const result = rowValidation(row);
+      return result.success
+        ? []
+        : importValidationMessages(result.error.issues, index + 1);
+    });
+    if (invalid.length) {
+      setError(invalid.join(" "));
+      return;
+    }
+    const finalized = selected.map((row) => importRowSchema.parse(row));
     setBusy(true);
     const controller = new AbortController();
     abort.current = controller;
@@ -126,7 +138,7 @@ export function PdfTrackerImport() {
         method: "POST",
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: selected }),
+        body: JSON.stringify({ rows: finalized }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Import failed");
@@ -140,7 +152,7 @@ export function PdfTrackerImport() {
         const row = selected[item.row];
         if (item.outcome !== "error") complete.add(row.id);
         messages.push(
-          `${row.company} · ${row.title}: ${item.error || item.outcome}`,
+          `Row ${rows.findIndex((draft) => draft.id === row.id) + 1} · ${row.company} · ${row.title}: ${item.error || item.outcome}`,
         );
       }
       setRows((previous) =>
@@ -200,7 +212,9 @@ export function PdfTrackerImport() {
                 setRows((previous) =>
                   previous.map((row) => ({
                     ...row,
-                    selected: rowValidation(row).success && !duplicate(row),
+                    selected:
+                      importFieldsSchema.safeParse(row).success &&
+                      !duplicate(row),
                   })),
                 )
               }
@@ -252,7 +266,7 @@ export function PdfTrackerImport() {
                 </thead>
                 <tbody>
                   {rows.map((row, index) => {
-                    const validation = rowValidation(row);
+                    const validation = importFieldsSchema.safeParse(row);
                     return (
                       <tr key={row.id}>
                         <td>
@@ -286,6 +300,12 @@ export function PdfTrackerImport() {
                                 })
                               }
                             />
+                            {field === "applied_on" &&
+                              row.source_applied_on && (
+                                <small>
+                                  Source date: {row.source_applied_on}
+                                </small>
+                              )}
                           </td>
                         ))}
                         <td>
@@ -320,7 +340,7 @@ export function PdfTrackerImport() {
                               })
                             }
                           >
-                            <option value="">Choose type</option>
+                            <option value="">Unknown / Not specified</option>
                             {["Internship", "Co-op", "Graduate"].map((type) => (
                               <option key={type}>{type}</option>
                             ))}
@@ -368,12 +388,10 @@ export function PdfTrackerImport() {
                           ))}
                           {!validation.success && (
                             <p className="error">
-                              {validation.error.issues
-                                .map(
-                                  (issue) =>
-                                    `${issue.path.join(".")}: ${issue.message}`,
-                                )
-                                .join("; ")}
+                              {importValidationMessages(
+                                validation.error.issues,
+                                index + 1,
+                              ).join(" ")}
                             </p>
                           )}
                           <small>
@@ -390,6 +408,9 @@ export function PdfTrackerImport() {
                               update(row.id, { reviewed: event.target.checked })
                             }
                           />
+                          <small>
+                            {row.reviewed ? "Confirmed" : "Needs review"}
+                          </small>
                         </td>
                         <td>
                           <Button

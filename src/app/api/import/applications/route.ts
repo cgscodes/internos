@@ -1,6 +1,6 @@
 import { authorized } from "@/lib/supabase/server";
 import { isSameOrigin } from "@/lib/auth/origin";
-import { importRowSchema } from "@/lib/pdf/tracker";
+import { finalizedImportRowSchema } from "@/lib/pdf/tracker";
 import { TrackingError } from "@/lib/services/errors";
 import { databaseError } from "@/lib/services/errors";
 
@@ -63,12 +63,12 @@ export async function POST(request: Request) {
         });
         continue;
       }
-      const parsed = importRowSchema.safeParse(input);
+      const parsed = finalizedImportRowSchema.safeParse(input);
       if (!parsed.success) {
         results.push({
           row,
           outcome: "error",
-          error: parsed.error.issues[0].message,
+          error: parsed.error.issues.map((issue) => issue.message).join(" "),
         });
         continue;
       }
