@@ -93,9 +93,8 @@ const server = createServer(async (request, response) => {
       const webCallback =
         callback.origin === appOrigin && callback.pathname === "/auth/callback";
       const nativeCallback =
-        callback.protocol === "com.internos.mobile:" &&
-        callback.hostname === "auth" &&
-        callback.pathname === "/callback" &&
+        callback.origin === appOrigin &&
+        callback.pathname === "/auth/native/return" &&
         /^[a-f0-9]{64}$/.test(callback.searchParams.get("state") || "");
       if (
         (!webCallback && !nativeCallback) ||
@@ -174,13 +173,21 @@ const server = createServer(async (request, response) => {
         if (endpoint.startsWith("rpc/")) {
           const name = endpoint.slice(4);
           if (
-            !["save_tracking_application", "save_tracking_job"].includes(name)
+            ![
+              "save_tracking_application",
+              "save_tracking_job",
+              "import_tracking_application",
+            ].includes(name)
           )
             throw new Error("Unsupported test function");
           const body = await bodyOf(request);
           const result = await tx.query(
-            `select public.${name}($1::jsonb,$2::boolean) as result`,
-            [JSON.stringify(body.p_data), body.p_create],
+            name === "import_tracking_application"
+              ? `select public.${name}($1::jsonb) as result`
+              : `select public.${name}($1::jsonb,$2::boolean) as result`,
+            name === "import_tracking_application"
+              ? [JSON.stringify(body.p_data)]
+              : [JSON.stringify(body.p_data), body.p_create],
           );
           return { data: result.rows[0].result, count: 1 };
         }
@@ -192,6 +199,7 @@ const server = createServer(async (request, response) => {
             "user_jobs",
             "applications",
             "application_events",
+            "application_import_receipts",
             "profiles",
             "resumes",
           ].includes(table)

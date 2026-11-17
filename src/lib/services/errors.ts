@@ -25,7 +25,7 @@ export function databaseError(error: { code?: string } | null) {
     );
   if (["PGRST202", "42703", "42P01"].includes(error.code || ""))
     throw new TrackingError(
-      "The database needs the Phase 2 application-tracking migration. Apply 002_application_tracking.sql, then reload.",
+      "The database needs the incremental tracking/import migrations. Apply 002_application_tracking.sql and 003_bulk_pdf_import.sql in order, then reload.",
       503,
     );
   // Do not return raw database errors: detail fields may contain private row values.

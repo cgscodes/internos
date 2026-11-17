@@ -7,7 +7,7 @@ import {
   clearNativeFlow,
   nativeResponse,
 } from "@/lib/auth/native-server";
-import { NATIVE_CALLBACK } from "@/lib/auth/native-contract";
+import { appOrigin } from "@/lib/auth/origin";
 export async function POST(request: Request) {
   if (!isSameOrigin(request))
     return nativeResponse({ error: "Sign-in must start from this app." }, 403);
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       .strict()
       .parse(await request.json());
     const flow = newNativeFlow(next);
-    const callback = new URL(NATIVE_CALLBACK);
+    const callback = new URL("/auth/native/return", appOrigin(request));
     callback.searchParams.set("state", flow.state);
     const client = await createClient({ nativePkce: true });
     const { data, error } = await client.auth.signInWithOAuth({

@@ -1,4 +1,4 @@
-// Database rows derived from the checked-in initial schema + 002_application_tracking.sql.
+// Database rows derived from the checked-in initial schema + incremental tracking/import migrations.
 // Regenerate from the deployed schema after applying 002 if additional schema changes exist.
 import type {
   Application,
@@ -32,6 +32,11 @@ export type Database = {
   public: {
     Tables: {
       applications: Table<ApplicationRow>;
+      application_import_receipts: Table<{
+        user_id: string;
+        import_key: string;
+        application_id: string;
+      }>;
       companies: Table<Company>;
       jobs: Table<JobRow>;
       user_jobs: Table<{
@@ -63,6 +68,7 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      import_tracking_application: { Args: { p_data: Json }; Returns: Json };
       save_tracking_application: {
         Args: { p_data: Json; p_create: boolean };
         Returns: string;

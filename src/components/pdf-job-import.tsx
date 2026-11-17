@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { PdfTrackerImport } from "./pdf-tracker-import";
 import { FileUp } from "lucide-react";
 import { Button } from "./ui/button";
 import { Modal } from "./ui/dialog";
@@ -20,6 +21,7 @@ export function PdfJobImport({
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [mode, setMode] = useState("individual");
   const [draft, setDraft] = useState<ImportedJob>();
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
@@ -113,7 +115,22 @@ export function PdfJobImport({
         title={draft ? "Review imported job" : "Import a job PDF"}
         description="Selectable-text PDFs up to 10 MB. Your file stays on this device; only reviewed job details are saved."
       >
-        {!draft ? (
+        {!draft && (
+          <label className="import-mode">
+            Import mode
+            <select
+              value={mode}
+              disabled={busy}
+              onChange={(event) => setMode(event.target.value)}
+            >
+              <option value="individual">Individual job posting</option>
+              <option value="tracker">Application tracker / bulk import</option>
+            </select>
+          </label>
+        )}
+        {mode === "tracker" ? (
+          <PdfTrackerImport />
+        ) : !draft ? (
           <div className="detail-content">
             <label>
               Job description PDF

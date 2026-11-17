@@ -101,7 +101,15 @@ async function openedAuthorization(page: Page) {
 async function callbackFor(page: Page, url: string) {
   const response = await page.request.get(url, { maxRedirects: 0 });
   expect(response.status()).toBe(302);
-  return response.headers().location;
+  const returned = response.headers().location;
+  const relay = await page.request.get(returned);
+  expect(relay.status()).toBe(200);
+  expect(relay.headers()["referrer-policy"]).toBe("no-referrer");
+  const match = (await relay.text()).match(
+    /href="(com\.internos\.mobile:[^"]+)"/,
+  );
+  expect(match).toBeTruthy();
+  return match![1].replaceAll("&amp;", "&");
 }
 
 test("native handoff exchanges inside the app, persists server cookies, rejects replay and signs out", async ({
@@ -113,7 +121,7 @@ test("native handoff exchanges inside the app, persists server cookies, rejects 
   await page.getByRole("button", { name: "Continue with Google" }).click();
   const url = await openedAuthorization(page);
   expect(new URL(new URL(url).searchParams.get("redirect_to")!).protocol).toBe(
-    "com.internos.mobile:",
+    "http:",
   );
   const verifier = (await context.cookies()).find((cookie) =>
     cookie.name.includes("-code-verifier"),
@@ -173,7 +181,13 @@ test("cold launch recovery completes without Safari sharing any app cookies", as
   let callback: string;
   try {
     const response = await systemBrowser.get(data.url, { maxRedirects: 0 });
-    callback = response.headers().location;
+    const returned = response.headers().location;
+    const relay = await systemBrowser.get(returned);
+    const match = (await relay.text()).match(
+      /href="(com\.internos\.mobile:[^"]+)"/,
+    );
+    expect(match).toBeTruthy();
+    callback = match![1].replaceAll("&amp;", "&");
     expect((await systemBrowser.storageState()).cookies).toHaveLength(0);
   } finally {
     await systemBrowser.dispose();

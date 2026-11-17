@@ -47,3 +47,44 @@ export function applicationFlow(events: Activity[]) {
     })),
   };
 }
+
+/** One path per application. No Reply is a display classification, never a stored status. */
+export function currentApplicationFlow(
+  applications: import("../models.ts").Application[],
+  noReplyDays = 30,
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const unique = [...new Map(applications.map((a) => [a.id, a])).values()];
+  const counts = new Map<string, number>();
+  for (const app of unique) {
+    const days = app.applied_on
+      ? (Date.parse(`${today}T00:00:00Z`) -
+          Date.parse(`${app.applied_on}T00:00:00Z`)) /
+        86400000
+      : -1;
+    const status =
+      app.status === "Applied" && days >= Math.max(1, noReplyDays)
+        ? "No Reply"
+        : app.status;
+    counts.set(status, (counts.get(status) || 0) + 1);
+  }
+  const outcome = (status: string) =>
+    status === "Offer"
+      ? "Offers"
+      : ["Rejected", "Withdrawn"].includes(status)
+        ? "Ended"
+        : status === "No Reply"
+          ? "Awaiting response"
+          : ["Saved", "Preparing", "Ready"].includes(status)
+            ? "Preparation"
+            : "In progress";
+  return {
+    total: unique.length,
+    rows: [...counts].map(([status, count]) => ({
+      status,
+      count,
+      outcome: outcome(status),
+      percent: unique.length ? (count / unique.length) * 100 : 0,
+    })),
+  };
+}

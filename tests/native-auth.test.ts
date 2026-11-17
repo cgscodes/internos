@@ -30,3 +30,29 @@ test("native callbacks accept only the registered scheme, route, nonce and PKCE 
   ])
     assert.throws(() => parseNativeCallback(value));
 });
+
+test("HTTPS return relay uses verified LiveContainer forwarding and carries no session material", async () => {
+  const { nativeReturnLinks } =
+    await import("../src/lib/auth/native-return.ts");
+  const links = nativeReturnLinks(`?state=${state}&code=one-use-pkce-code`);
+  assert.equal(parseNativeCallback(links.app).code, "one-use-pkce-code");
+  for (const [index, link] of links.containers.entries()) {
+    const url = new URL(link);
+    assert.equal(
+      url.protocol,
+      `${["livecontainer", "livecontainer2", "livecontainer3"][index]}:`,
+    );
+    assert.equal(url.hostname, "open-url");
+    assert.equal(
+      Buffer.from(url.searchParams.get("url")!, "base64").toString(),
+      links.app,
+    );
+  }
+  for (const query of [
+    `?state=${state}&access_token=forbidden`,
+    `?state=${state}&code=ok&next=https://evil.test`,
+    `?state=${state}&code=ok&code=again`,
+    `?state=invalid&code=ok`,
+  ])
+    assert.throws(() => nativeReturnLinks(query));
+});

@@ -221,7 +221,7 @@ export async function createNativeOAuth(
             phase === "waiting"
           )
             void cancel(
-              "Sign-in timed out. Select Continue with Google to start again.",
+              "Sign-in timed out before it could return to the app. In Safari, use Open in LiveContainer for a guest installation, then select the same host. Cancel and start again if the return link has expired.",
             );
         }),
       ),
@@ -246,7 +246,7 @@ export async function createNativeOAuth(
       expiry = Date.now() + NATIVE_FLOW_TTL_MS;
       timer = setTimeout(() => {
         void cancel(
-          "Sign-in timed out. Select Continue with Google to start again.",
+          "Sign-in timed out before it could return to the app. In Safari, use Open in LiveContainer for a guest installation, then select the same host. Cancel and start again if the return link has expired.",
         );
       }, NATIVE_FLOW_TTL_MS);
       try {

@@ -120,6 +120,11 @@ export function ApplicationDialog({
             defaultValue={app?.source || "Manual entry"}
           />
         </label>
+        {app?.source_status && (
+          <p className="full-width subtle-label">
+            Original Handshake status: {app.source_status}
+          </p>
+        )}
         <label>
           Application deadline
           <input

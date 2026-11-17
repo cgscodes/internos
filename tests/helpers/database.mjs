@@ -12,6 +12,7 @@ export async function createTestDatabase() {
   for (const file of [
     "202611110001_initial.sql",
     "002_application_tracking.sql",
+    "003_bulk_pdf_import.sql",
   ])
     await db.exec(
       await readFile(

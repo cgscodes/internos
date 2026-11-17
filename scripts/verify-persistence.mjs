@@ -1,6 +1,6 @@
 // Opt-in LIVE Supabase check. Uses only a public project key and test-user JWTs.
 import { existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 for (const file of [".env.local", ".env.persistence-test.local"])
   if (existsSync(file)) process.loadEnvFile(file);
@@ -44,7 +44,7 @@ function checked(result) {
   return result.data;
 }
 const client = clientFor(token);
-let owner, record, job, company;
+let owner, record, job, company, imported;
 const id = randomUUID();
 try {
   const verified = checked(await client.auth.getUser(token));
@@ -118,6 +118,57 @@ try {
   });
   if (duplicate.error?.code !== "23505")
     throw new Error("Duplicate prevention verification failed");
+  const importData = {
+    ...data,
+    company: `InternOS bulk smoke ${id.slice(0, 8)}`,
+    title: "Temporary bulk import verification",
+    import_key: `${createHash("sha256").update(id).digest("hex")}:1:1`,
+    status: "Applied",
+    source_status: "Applied",
+    applied_on: new Date().toISOString().slice(0, 10),
+    reviewed: true,
+  };
+  const created = checked(
+    await fresh.rpc("import_tracking_application", { p_data: importData }),
+  );
+  if (created.outcome !== "created")
+    throw new Error("Bulk import did not create a new record");
+  imported = { id: created.id };
+  const importedRow = checked(
+    await clientFor(token)
+      .from("applications")
+      .select("id,job_id,company_id,source,source_status,applied_on,status")
+      .eq("id", imported.id)
+      .single(),
+  );
+  Object.assign(imported, importedRow);
+  if (
+    importedRow.source !== "Handshake" ||
+    importedRow.applied_on !== importData.applied_on ||
+    importedRow.status !== "Applied" ||
+    importedRow.source_status !== "Applied"
+  )
+    throw new Error("Imported fields were not preserved");
+  const repeated = checked(
+    await fresh.rpc("import_tracking_application", { p_data: importData }),
+  );
+  if (repeated.outcome !== "duplicate" || repeated.id !== imported.id)
+    throw new Error("Bulk reimport was not idempotent");
+  const importedHistory = checked(
+    await fresh
+      .from("application_events")
+      .select("from_status,to_status")
+      .eq("application_id", imported.id),
+  );
+  if (
+    importedHistory.length !== 1 ||
+    importedHistory[0].from_status !== null ||
+    importedHistory[0].to_status !== "Applied"
+  )
+    throw new Error("Bulk import invented history");
+  console.log(
+    "PASS: live bulk import, preserved source/date/status, initial event, and idempotent reimport.",
+  );
   const otherToken = process.env.INTERNOS_OTHER_USER_TEST_TOKEN;
   if (otherToken) {
     const other = clientFor(otherToken);
@@ -135,7 +186,20 @@ try {
       .select("id");
     if (!changed.error && changed.data?.length)
       throw new Error("Cross-user write isolation failed");
-    console.log("PASS: live cross-user read/write isolation.");
+    const importedVisible = checked(
+      await other.from("applications").select("id").eq("id", imported.id),
+    );
+    const receiptsVisible = checked(
+      await other
+        .from("application_import_receipts")
+        .select("import_key")
+        .eq("application_id", imported.id),
+    );
+    if (importedVisible.length || receiptsVisible.length)
+      throw new Error("Bulk import cross-user isolation failed");
+    console.log(
+      "PASS: live cross-user read/write isolation, including imported rows and receipts.",
+    );
   } else
     console.log(
       "SKIPPED: live cross-user check needs INTERNOS_OTHER_USER_TEST_TOKEN for a second test account.",
@@ -149,6 +213,52 @@ try {
   );
   process.exitCode = 1;
 } finally {
+  if (imported && owner) {
+    const lookup = await client
+      .from("applications")
+      .select("job_id,company_id")
+      .eq("id", imported.id)
+      .eq("user_id", owner)
+      .maybeSingle();
+    const cleanup = [];
+    cleanup.push(
+      await client
+        .from("applications")
+        .delete()
+        .eq("id", imported.id)
+        .eq("user_id", owner),
+    );
+    if (lookup.data?.job_id) {
+      cleanup.push(
+        await client
+          .from("user_jobs")
+          .delete()
+          .eq("job_id", lookup.data.job_id)
+          .eq("user_id", owner),
+      );
+      cleanup.push(
+        await client
+          .from("jobs")
+          .delete()
+          .eq("id", lookup.data.job_id)
+          .eq("created_by", owner),
+      );
+    }
+    if (lookup.data?.company_id)
+      cleanup.push(
+        await client
+          .from("companies")
+          .delete()
+          .eq("id", lookup.data.company_id)
+          .eq("created_by", owner),
+      );
+    if (cleanup.some((result) => result.error)) {
+      console.log(
+        "FAILED: temporary bulk verification cleanup incomplete; inspect InternOS bulk smoke records.",
+      );
+      process.exitCode = 1;
+    }
+  }
   if (record && owner) {
     // Recover IDs after a transient read failure, so synthetic records can still be removed.
     if (!job || !company) {

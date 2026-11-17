@@ -43,6 +43,7 @@ export function applicationDraft(
     deadline: job?.deadline || "",
     job_id: job?.id || null,
     status,
+    source_status: "",
     notes: "",
     important_date: "",
     applied_on: "",

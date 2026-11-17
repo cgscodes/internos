@@ -36,6 +36,7 @@ export const applicationSchema = z.object({
   ...jobFields,
   job_id: z.uuid().nullable().default(null),
   status: z.enum(statuses),
+  source_status: z.string().max(120).default(""),
   notes: z.string().max(10000),
   important_date: dateInput,
   applied_on: dateInput.default(""),

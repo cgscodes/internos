@@ -21,63 +21,83 @@ async function allRows<T>(
 }
 export async function getWorkspace(): Promise<Workspace> {
   const { client, user } = await authorized();
-  const [applications, jobs, companies, bookmarks, resumes, events, profile] =
-    await Promise.all([
-      allRows((from, to) =>
-        client
-          .from("applications")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .order("id")
-          .range(from, to),
-      ),
-      allRows((from, to) =>
-        client
-          .from("jobs")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .order("id")
-          .range(from, to),
-      ),
-      allRows((from, to) =>
-        client
-          .from("companies")
-          .select("*")
-          .order("name")
-          .order("id")
-          .range(from, to),
-      ),
-      allRows((from, to) =>
-        client
-          .from("user_jobs")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("id")
-          .range(from, to),
-      ),
-      allRows((from, to) =>
-        client
-          .from("resumes")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .order("id")
-          .range(from, to),
-      ),
-      allRows((from, to) =>
-        client
-          .from("application_events")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .order("id")
-          .range(from, to),
-      ),
-      client.from("profiles").select("*").eq("id", user.id).maybeSingle(),
-    ]);
+  const [
+    applications,
+    jobs,
+    companies,
+    bookmarks,
+    resumes,
+    events,
+    profile,
+    imports,
+  ] = await Promise.all([
+    allRows((from, to) =>
+      client
+        .from("applications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    allRows((from, to) =>
+      client
+        .from("jobs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    allRows((from, to) =>
+      client
+        .from("companies")
+        .select("*")
+        .order("name")
+        .order("id")
+        .range(from, to),
+    ),
+    allRows((from, to) =>
+      client
+        .from("user_jobs")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to),
+    ),
+    allRows((from, to) =>
+      client
+        .from("resumes")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    allRows((from, to) =>
+      client
+        .from("application_events")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    client.from("profiles").select("*").eq("id", user.id).maybeSingle(),
+    allRows((from, to) =>
+      client
+        .from("application_import_receipts")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("import_key")
+        .range(from, to),
+    ),
+  ]);
   databaseError(profile.error);
   return {
+    imports: imports.map(({ import_key, application_id }) => ({
+      import_key,
+      application_id,
+    })),
     applications: applications.map((a) => ({
       ...a,
       applied_on: a.applied_on || "",

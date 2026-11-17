@@ -3010,3 +3010,43 @@ input[type="checkbox"] {
     min-width: 0;
   }
 }
+
+.import-mode {
+  display: grid;
+  gap: 8px;
+  margin: 20px;
+}
+.bulk-import {
+  min-width: 0;
+}
+.bulk-review-fields {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.bulk-review-table {
+  min-width: 1800px;
+}
+.bulk-review-table td {
+  vertical-align: top;
+  padding: 8px;
+}
+.bulk-review-table input:not([type="checkbox"]),
+.bulk-review-table select {
+  min-width: 140px;
+  width: 100%;
+}
+.bulk-review-table small {
+  display: block;
+}
+.bulk-review-table td:nth-child(9) {
+  min-width: 260px;
+  white-space: normal;
+}
+.flow-scroll {
+  overflow-x: auto;
+}
+.flow-scroll svg {
+  min-width: 640px;
+  width: 100%;
+}

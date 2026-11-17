@@ -43,6 +43,7 @@ export type Activity = {
 };
 export type Workspace = {
   applications: Application[];
+  imports?: { import_key: string; application_id: string }[];
   jobs: Job[];
   companies: Company[];
   bookmarks: string[];

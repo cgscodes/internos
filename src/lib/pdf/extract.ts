@@ -1,7 +1,24 @@
 import { PDF_LIMITS, validatePdfBytes } from "./job-fields.ts";
 
 /** Data-only text extraction. No rendering, actions, annotations, attachments or remote resources. */
-export async function extractPdfText(bytes: Uint8Array, signal?: AbortSignal) {
+export type PdfTextItem = {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+export type PdfPage = {
+  number: number;
+  width: number;
+  height: number;
+  items: PdfTextItem[];
+};
+export async function extractPdfLayout(
+  bytes: Uint8Array,
+  signal?: AbortSignal,
+  bulk = false,
+) {
   validatePdfBytes(bytes);
   if (signal?.aborted) throw new Error("Import cancelled.");
   const pdf = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -61,8 +78,11 @@ export async function extractPdfText(bytes: Uint8Array, signal?: AbortSignal) {
         if (document.numPages > PDF_LIMITS.pages)
           throw new Error("Use a PDF with no more than 40 pages.");
         let text = "";
+        const pages: PdfPage[] = [];
         for (let number = 1; number <= document.numPages; number++) {
           const page = await document.getPage(number);
+          const viewport = page.getViewport({ scale: 1 });
+          const items: PdfTextItem[] = [];
           const stream = page
             .streamTextContent({ disableNormalization: false })
             .getReader();
@@ -72,10 +92,23 @@ export async function extractPdfText(bytes: Uint8Array, signal?: AbortSignal) {
               if (chunk.done) break;
               for (const item of chunk.value.items) {
                 if (!("str" in item)) continue;
+                const position = pdf.Util.transform(
+                  viewport.transform,
+                  item.transform,
+                );
+                items.push({
+                  text: item.str,
+                  x: position[4],
+                  y: position[5],
+                  width: item.width,
+                  height: Math.abs(item.height),
+                });
                 text += item.str + (item.hasEOL ? "\n" : " ");
-                if (text.length > PDF_LIMITS.characters)
+                if (text.length > (bulk ? 250000 : PDF_LIMITS.characters))
                   throw new Error(
-                    "Extracted text exceeds 19,000 characters. Use a shorter job PDF; text is never silently truncated.",
+                    bulk
+                      ? "Extracted tracker text exceeds 250,000 characters."
+                      : "Extracted text exceeds 19,000 characters. Use a shorter job PDF; text is never silently truncated.",
                   );
               }
             }
@@ -83,13 +116,19 @@ export async function extractPdfText(bytes: Uint8Array, signal?: AbortSignal) {
             stream.releaseLock();
           }
           text += "\n\n";
+          pages.push({
+            number,
+            width: viewport.width,
+            height: viewport.height,
+            items,
+          });
           page.cleanup();
         }
         if (!text.trim())
           throw new Error(
             "No selectable text found. Scanned/image PDFs need a text export; OCR is not available.",
           );
-        return text.trim();
+        return { text: text.trim(), pages };
       })(),
     ]);
   } catch (error) {
@@ -110,4 +149,8 @@ export async function extractPdfText(bytes: Uint8Array, signal?: AbortSignal) {
     nativeWorker?.terminate();
     worker?.destroy();
   }
+}
+
+export async function extractPdfText(bytes: Uint8Array, signal?: AbortSignal) {
+  return (await extractPdfLayout(bytes, signal)).text;
 }

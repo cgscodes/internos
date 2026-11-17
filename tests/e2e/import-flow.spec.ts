@@ -57,6 +57,7 @@ test("PDF review preserves text, saves a job once, and starts a Saved applicatio
   expect(changed.ok()).toBeTruthy();
   await page.goto("/");
   const section = page.locator(".application-flow");
+  await section.getByLabel("Analytics view").selectOption("transitions");
   await expect(section.getByRole("img")).toBeVisible();
   await expect(section.getByRole("table")).toContainText("SavedApplied1100.0%");
   expect(
@@ -116,10 +117,180 @@ test("PDF invalid content, size limits, missing fields, and expired session are 
 test("Application Flow uses an empty state until explicit transitions exist", async ({
   page,
 }) => {
+  await page.getByLabel("Analytics view").selectOption("transitions");
   await expect(page.locator(".application-flow")).toContainText(
     "Your flow starts with a status change",
   );
   await expect(
     page.locator(".application-flow").getByRole("table"),
   ).toHaveCount(0);
+});
+
+test("bulk tracker review imports corrected rows, refreshes analytics and safely reimports multiple PDFs", async ({
+  page,
+}) => {
+  const { trackerPdf } = await import("../helpers/job-pdf.mjs");
+  await page.goto("/discover");
+  await page.getByRole("button", { name: "Import PDF", exact: true }).click();
+  await page.getByLabel("Import mode").selectOption("tracker");
+  const file = {
+    name: "tracker.pdf",
+    mimeType: "application/pdf",
+    buffer: trackerPdf(),
+  };
+  await page
+    .getByLabel("Application tracker PDFs")
+    .setInputFiles([file, { ...file, name: "tracker-copy.pdf" }]);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Detected" }),
+  ).toContainText("Detected 4");
+  const before = await (await page.request.get("/api/workspace")).json();
+  expect(before.applications).toHaveLength(0);
+  await page
+    .getByLabel("company row 2", { exact: true })
+    .fill("Corrected employer");
+  await page.getByLabel("applied_on row 2", { exact: true }).fill("2026-11-01");
+  await page
+    .getByLabel("Status row 2", { exact: true })
+    .selectOption("Applied");
+  for (let row = 1; row <= 4; row++) {
+    await page
+      .getByLabel(`Job type row ${row}`, { exact: true })
+      .selectOption("Internship");
+    if (row === 4)
+      await page
+        .getByLabel(`Status row ${row}`, { exact: true })
+        .selectOption("Applied");
+    await page.getByLabel(`Confirm review row ${row}`, { exact: true }).check();
+  }
+  await page
+    .getByRole("button", {
+      name: "Import 4 selected applications",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "created" }),
+  ).toBeVisible();
+  const after = await (await page.request.get("/api/workspace")).json();
+  expect(after.applications).toHaveLength(4);
+  expect(after.events).toHaveLength(4);
+  expect(
+    after.events.every(
+      (event: { from_status: string | null }) => event.from_status === null,
+    ),
+  ).toBeTruthy();
+  expect(
+    after.applications.find(
+      (app: { company: string }) => app.company === "Corrected employer",
+    ).source_status,
+  ).toBe("Closed");
+  // Upload the original bytes: receipt identity survives review corrections.
+  await page.getByLabel("Application tracker PDFs").setInputFiles(file);
+  for (let row = 1; row <= 4; row++) {
+    await page
+      .getByLabel(`Job type row ${row}`, { exact: true })
+      .selectOption("Internship");
+    if (row === 2) {
+      await page
+        .getByLabel("applied_on row 2", { exact: true })
+        .fill("2026-11-01");
+      await page
+        .getByLabel("Status row 2", { exact: true })
+        .selectOption("Applied");
+    }
+    if (row === 4)
+      await page
+        .getByLabel("Status row 4", { exact: true })
+        .selectOption("Applied");
+    await page.getByLabel(`Confirm review row ${row}`, { exact: true }).check();
+  }
+  await page
+    .getByRole("button", {
+      name: "Import 4 selected applications",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "duplicate" }),
+  ).toBeVisible();
+  expect(
+    (await (await page.request.get("/api/workspace")).json()).applications,
+  ).toHaveLength(4);
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.goto("/");
+  await expect(
+    page.locator(".application-flow").getByRole("table"),
+  ).toContainText("Applied375.0%");
+  await page.getByLabel("Analytics view").selectOption("transitions");
+  await expect(page.locator(".application-flow")).toContainText(
+    "Your flow starts with a status change",
+  );
+});
+
+test("bulk import API enforces authentication, review validation, origin and per-row failure results", async ({
+  page,
+}) => {
+  const headers = { Origin: new URL(page.url()).origin };
+  const valid = {
+    id: crypto.randomUUID(),
+    import_key: `${"a".repeat(64)}:1:1`,
+    company: "API Studio",
+    title: "Intern",
+    location: "Remote",
+    applied_on: "2026-11-01",
+    source_status: "Applied",
+    status: "Applied",
+    type: "Internship",
+    job_id: null,
+    reviewed: true,
+  };
+  const denied = await page.request.post("/api/import/applications", {
+    headers: { Origin: "https://evil.test" },
+    data: { rows: [valid] },
+  });
+  expect(denied.status()).toBe(403);
+  const response = await page.request.post("/api/import/applications", {
+    headers,
+    data: {
+      rows: [
+        valid,
+        {
+          ...valid,
+          import_key: `${"a".repeat(64)}:1:2`,
+          company: "Failed Studio",
+          job_id: crypto.randomUUID(),
+        },
+        { ...valid, reviewed: false },
+      ],
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  const result = await response.json();
+  expect(result.results.map((r: { outcome: string }) => r.outcome)).toEqual([
+    "created",
+    "error",
+    "error",
+  ]);
+  const workspace = await (await page.request.get("/api/workspace")).json();
+  expect(workspace.applications).toHaveLength(1);
+  expect(
+    workspace.companies.some(
+      (c: { name: string }) => c.name === "Failed Studio",
+    ),
+  ).toBeFalsy();
+  const { request } = await import("@playwright/test");
+  const anonymous = await request.newContext();
+  try {
+    expect(
+      (
+        await anonymous.post(
+          new URL("/api/import/applications", page.url()).href,
+          { headers, data: { rows: [valid] } },
+        )
+      ).status(),
+    ).toBe(401);
+  } finally {
+    await anonymous.dispose();
+  }
 });
