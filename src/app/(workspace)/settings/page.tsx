@@ -199,12 +199,12 @@ export default function Settings() {
               </span>
             </div>
             <div className="integration-line">
-              <span>OpenAI</span>
-              <span className="subtle-label">NOT CONNECTED</span>
+              <span>Google Gemini</span>
+              <span className="subtle-label">RESUME MATCHING</span>
             </div>
             <p>
-              AI matching and resume tailoring are intentionally deferred. No
-              profile data is sent to OpenAI.
+              Compare a saved resume with a bookmarked opportunity from its job
+              details. Resume text is shared with Gemini only when you analyze.
             </p>
           </section>
         </div>

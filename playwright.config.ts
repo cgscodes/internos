@@ -16,6 +16,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120000,
       env: {
+        GEMINI_API_KEY: "",
         NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3100",
         NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54329",
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
@@ -26,7 +27,7 @@ export default defineConfig({
   projects: [
     {
       name: "safari",
-      testMatch: ["design.spec.ts", "import-flow.spec.ts"],
+      testMatch: ["design.spec.ts", "import-flow.spec.ts", "ai-match.spec.ts"],
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 1440, height: 1000 },
@@ -34,7 +35,7 @@ export default defineConfig({
     },
     {
       name: "webkit-iphone",
-      testMatch: ["design.spec.ts", "import-flow.spec.ts"],
+      testMatch: ["design.spec.ts", "import-flow.spec.ts", "ai-match.spec.ts"],
       use: { ...devices["iPhone 13"] },
     },
     {

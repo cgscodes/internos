@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/dialog";
 import { ApplicationDialog } from "@/components/application-dialog";
 import { PdfJobImport } from "@/components/pdf-job-import";
+import { JobMatchPanel } from "@/components/job-match-panel";
 import { JobDialog } from "@/components/job-dialog";
 import { PageHeader } from "@/components/design/page";
 import { GlassSurface } from "@/components/design/glass";
@@ -64,8 +65,8 @@ export default function Discover() {
       />
       <div className="info-banner">
         Your opportunity library · Manual postings and the shared catalog. No
-        automated feed or AI match scoring is connected. Bookmark a job, then
-        start an application from its details.
+        automated feed is connected. Bookmark a job to analyze its match with a
+        saved resume or start an application from its details.
       </div>
       <GlassSurface className="filter-bar">
         <label className="search-field">
@@ -165,6 +166,11 @@ export default function Discover() {
             <p className="preserve-lines">
               {details.description || "No job description provided."}
             </p>
+            <JobMatchPanel
+              key={details.id}
+              jobId={details.id}
+              saved={data.bookmarks.includes(details.id)}
+            />
             <div className="form-actions">
               {canEdit && (
                 <Button

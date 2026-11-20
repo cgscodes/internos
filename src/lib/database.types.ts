@@ -28,9 +28,25 @@ export type ApplicationRow = Omit<Application, "applied_on"> & {
   updated_at: string;
 };
 export type JobRow = Omit<Job, "deadline"> & { deadline: string | null };
+export type JobMatchRow = {
+  id: string;
+  user_id: string;
+  job_id: string;
+  resume_id: string;
+  model: string;
+  prompt_version: string;
+  input_hash: string;
+  job_hash: string;
+  resume_hash: string;
+  created_at: string;
+  match_score: number;
+  findings: Json;
+  usage: Json;
+};
 export type Database = {
   public: {
     Tables: {
+      job_match_analyses: Table<JobMatchRow>;
       applications: Table<ApplicationRow>;
       application_import_receipts: Table<{
         user_id: string;
@@ -68,6 +84,11 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      begin_job_match: {
+        Args: { p_job_id: string; p_resume_id: string };
+        Returns: string;
+      };
+      end_job_match: { Args: { p_lease: string }; Returns: undefined };
       import_tracking_application: { Args: { p_data: Json }; Returns: Json };
       save_tracking_application: {
         Args: { p_data: Json; p_create: boolean };

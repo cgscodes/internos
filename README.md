@@ -4,6 +4,8 @@ A mobile-first internship workspace built with Next.js App Router, strict TypeSc
 
 See [the UI redesign report and release/IPA handoff](docs/ui-redesign.md) for design tokens, screenshots, accessibility validation, and the deployment checklist. The redesign is local until explicitly approved for deployment.
 
+Phase 4.1 adds Gemini resume matching in saved job details. See [the matching implementation and deployment guide](docs/gemini-matching.md) for changed files, scoring, security, migration `005`, `GEMINI_API_KEY`, tests, and live verification steps. Apply migration `004` before `005` if it is still pending. Matching currently requires a selectable-text PDF resume.
+
 ## Start the existing application
 
 Requires Node.js 22.13+ and npm. Keep your existing `.env.local` intact.
@@ -94,7 +96,7 @@ Import this repository into Vercel, use the Next.js preset, and set both Supabas
 
 ## Deferred
 
-AI matching, OpenAI requests, resume parsing/tailoring, live job ingestion, automated recommendations, drag-and-drop Kanban, calendar/email integrations, interview-specific scheduling UI, account deletion, multi-factor enrollment UI, and document deletion are deferred. The interviews table is a scheduling foundation; applications use pipeline status and important dates, while user_jobs stores active bookmarks. AI is not presented as active. `OPENAI_API_KEY` is reserved and unused.
+OpenAI/Claude integrations, resume rewriting/tailoring, live job ingestion, automated applications, drag-and-drop Kanban, calendar/email integrations, interview-specific scheduling UI, account deletion, multi-factor enrollment UI, and document deletion are deferred. The interviews table is a scheduling foundation; applications use pipeline status and important dates, while user_jobs stores active bookmarks. Gemini matching is available on explicit request; its key stays server-side.
 
 Live Google OAuth, Supabase Storage behavior, and deployed multi-user flows require configured infrastructure and must be smoke-tested there before public release. Automated local database tests verify the migration, ownership isolation, cross-owner foreign keys, and event/version triggers in PostgreSQL via PGlite; they do not substitute for a hosted Supabase integration test.
 
@@ -159,7 +161,7 @@ Exit code 2 means required credentials were missing and the live test did not ru
 
 `npm test` applies both migrations to isolated PGlite databases and checks real PostgreSQL functions, RLS, ownership boundaries, history, rollback, duplicates/reapplication, empty counts, and validation. `npm run test:e2e` builds and runs the production Next.js app on port 3100, with simulated OAuth and a local PostgREST-compatible adapter backed by **the same real PGlite schema/functions/policies**, rather than JavaScript record mocks. It covers existing auth flows plus application/job CRUD, refresh persistence, bookmarks, counts, status failure handling, direct API isolation, and desktop/iPhone layouts. Test fixtures are inserted only into the isolated local database.
 
-These tests do not certify the deployed Supabase instance, its gateway configuration, or provider setup. Production persistence is **unverified until the live checklist or `test:live` succeeds**. No AI integration or scraping is included. Drag-and-drop, realtime subscriptions across devices, and server-side paginated catalog browsing are deferred; the current workspace refreshes snapshots after mutations and loads the visible catalog/history in batches. Browser tests temporarily build with test public environment values, so run a final `npm run build` with your real environment before deployment.
+These tests do not certify the deployed Supabase instance, its gateway configuration, or provider setup. Production persistence is **unverified until the live checklist or `test:live` succeeds**. The Phase 2 tests do not exercise the separate Phase 4.1 Gemini integration; scraping remains out of scope. Drag-and-drop, realtime subscriptions across devices, and server-side paginated catalog browsing are deferred; the current workspace refreshes snapshots after mutations and loads the visible catalog/history in batches. Browser tests temporarily build with test public environment values, so run a final `npm run build` with your real environment before deployment.
 
 ## Capacitor iOS Google OAuth
 

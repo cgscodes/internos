@@ -6,6 +6,8 @@ const db = await createTestDatabase();
 const sessions = new Map(),
   refreshTokens = new Map(),
   codes = new Map();
+const storedFiles = new Map(),
+  signedFiles = new Map();
 const appOrigin = "http://127.0.0.1:3100";
 const job = (id, company, title) => ({
   id,
@@ -162,7 +164,48 @@ const server = createServer(async (request, response) => {
       if (user) sessions.delete(token);
       return send(204);
     }
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/storage/v1/object/sign/resumes/")
+    ) {
+      const path = url.pathname.slice(
+        "/storage/v1/object/sign/resumes/".length,
+      );
+      const signed = signedFiles.get(url.searchParams.get("token"));
+      if (
+        !signed ||
+        signed.path !== path ||
+        signed.expires < Date.now() ||
+        !storedFiles.has(path)
+      )
+        return send(403, {});
+      response.writeHead(200, { "Content-Type": "application/pdf" });
+      response.end(storedFiles.get(path));
+      return;
+    }
     if (!user) return send(401, { message: "Unauthorized" });
+    if (url.pathname.startsWith("/storage/v1/object/")) {
+      const signing = url.pathname.startsWith(
+        "/storage/v1/object/sign/resumes/",
+      );
+      const prefix = signing
+        ? "/storage/v1/object/sign/resumes/"
+        : "/storage/v1/object/resumes/";
+      const path = url.pathname.slice(prefix.length);
+      if (!path.startsWith(user.id + "/")) return send(403, {});
+      if (signing) {
+        if (!storedFiles.has(path)) return send(404, {});
+        const token = randomUUID();
+        signedFiles.set(token, { path, expires: Date.now() + 60000 });
+        return send(200, {
+          signedURL: `/object/sign/resumes/${path}?token=${token}`,
+        });
+      }
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      storedFiles.set(path, Buffer.concat(chunks));
+      return send(200, { Key: `resumes/${path}` });
+    }
     if (url.pathname.startsWith("/rest/v1/")) {
       const result = await db.transaction(async (tx) => {
         await tx.exec("set local role authenticated");
@@ -177,10 +220,23 @@ const server = createServer(async (request, response) => {
               "save_tracking_application",
               "save_tracking_job",
               "import_tracking_application",
+              "begin_job_match",
+              "end_job_match",
             ].includes(name)
           )
             throw new Error("Unsupported test function");
           const body = await bodyOf(request);
+          if (name === "begin_job_match" || name === "end_job_match") {
+            const admission = await tx.query(
+              name === "begin_job_match"
+                ? "select public.begin_job_match($1,$2) as result"
+                : "select public.end_job_match($1) as result",
+              name === "begin_job_match"
+                ? [body.p_job_id, body.p_resume_id]
+                : [body.p_lease],
+            );
+            return { data: admission.rows[0].result, count: 1 };
+          }
           const result = await tx.query(
             name === "import_tracking_application"
               ? `select public.${name}($1::jsonb) as result`
@@ -200,6 +256,7 @@ const server = createServer(async (request, response) => {
             "applications",
             "application_events",
             "application_import_receipts",
+            "job_match_analyses",
             "profiles",
             "resumes",
           ].includes(table)

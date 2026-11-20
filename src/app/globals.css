@@ -3050,3 +3050,59 @@ input[type="checkbox"] {
   min-width: 640px;
   width: 100%;
 }
+
+/* Match analysis uses the existing opaque content and glass control palette. */
+.match-panel {
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  overflow-wrap: anywhere;
+}
+.match-panel label {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.match-panel select {
+  width: 100%;
+  min-width: 0;
+}
+.match-panel p,
+.match-panel li {
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+.match-panel .match-note,
+.match-findings small {
+  font-size: var(--text-xs);
+  color: var(--secondary);
+}
+.match-findings small {
+  display: block;
+}
+.match-findings h3 {
+  margin-top: var(--space-3);
+}
+.match-findings h4 {
+  margin-top: var(--space-2);
+}
+.match-findings ul {
+  padding-left: var(--space-3);
+}
+.match-findings li {
+  margin-bottom: var(--space-2);
+}
+.match-overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.match-score {
+  font-size: 2rem;
+}
+.match-score small {
+  display: inline;
+  font-weight: normal;
+}

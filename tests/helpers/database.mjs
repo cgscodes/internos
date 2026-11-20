@@ -14,6 +14,7 @@ export async function createTestDatabase() {
     "002_application_tracking.sql",
     "003_bulk_pdf_import.sql",
     "004_incomplete_import_rows.sql",
+    "005_ai_job_matching.sql",
   ])
     await db.exec(
       await readFile(
@@ -24,5 +25,7 @@ export async function createTestDatabase() {
   await db.exec(
     "grant usage on schema public,auth,storage to authenticated; grant select,insert,update,delete on all tables in schema public,storage to authenticated;",
   );
+  // Match quota state is writable only through the bounded admission RPCs.
+  await db.exec("revoke all on public.ai_match_limits from authenticated");
   return db;
 }
