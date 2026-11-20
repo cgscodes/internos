@@ -19,6 +19,13 @@ export function PdfTrackerImport() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [messages, setMessages] = useState<string[]>([]);
+  const [skipIncomplete, setSkipIncomplete] = useState(true);
+  const [summary, setSummary] = useState<{
+    imported: number;
+    skipped: number;
+    duplicates: number;
+    failed: number;
+  } | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [progress, setProgress] = useState<{
     completed: number;
@@ -39,12 +46,13 @@ export function PdfTrackerImport() {
   const eligibleSelected = selected.filter(
     (row) => reviewImportRow(row).eligible,
   );
-  const { ready } = prepareSelectedImports(rows);
+  const { ready, skipped } = prepareSelectedImports(rows);
   async function extract(files: File[]) {
     setBusy(true);
     setError("");
     setMessages([]);
     setProgress(null);
+    setSummary(null);
     const controller = new AbortController();
     abort.current = controller;
     const timer = setTimeout(() => controller.abort(), 120000);
@@ -127,6 +135,20 @@ export function PdfTrackerImport() {
       return;
     }
     const { ready, skipped } = prepareSelectedImports(rows);
+    if (!skipIncomplete && skipped.length) {
+      setError(
+        "Resolve or deselect incomplete rows, or enable Skip Incomplete Rows.",
+      );
+      return;
+    }
+    const counts = {
+      imported: 0,
+      skipped: skipped.length,
+      duplicates: 0,
+      failed: 0,
+    };
+    setSummary({ ...counts });
+    let completed = 0;
     const outcomes = skipped.map(
       ({ index, row, errors }) =>
         `Row ${index + 1} · ${row.company || "Unknown company"} · ${row.title || "Unknown role"}: not imported — ${errors.join(" ")}`,
@@ -163,7 +185,12 @@ export function PdfTrackerImport() {
           error?: string;
         }[]) {
           const { row, index } = chunk[item.row];
-          if (item.outcome !== "error") complete.add(row.id);
+          if (item.outcome === "created" || item.outcome === "duplicate") {
+            complete.add(row.id);
+            if (item.outcome === "created") counts.imported++;
+            else counts.duplicates++;
+          } else counts.failed++;
+          completed++;
           outcomes.push(
             `Row ${index + 1} · ${row.company} · ${row.title}: ${item.error || item.outcome}`,
           );
@@ -173,11 +200,15 @@ export function PdfTrackerImport() {
             complete.has(row.id) ? { ...row, selected: false } : row,
           ),
         );
+        setSummary({ ...counts });
         setMessages([...outcomes]);
         setProgress({ completed: offset + chunk.length, total: ready.length });
       }
       await reload();
     } catch (error) {
+      // A lost response leaves unconfirmed outcomes retryable through import receipts.
+      counts.failed += ready.length - completed;
+      setSummary({ ...counts });
       await reload().catch(() => {});
       setError(
         controller.signal.aborted
@@ -294,6 +325,19 @@ export function PdfTrackerImport() {
             </Button>
           </div>
           <label>
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={skipIncomplete}
+              onChange={(event) => setSkipIncomplete(event.target.checked)}
+            />
+            Skip Incomplete Rows
+          </label>
+          <p>
+            Unknown dates stay blank. Unmapped statuses stay in this draft until
+            you choose a status and confirm the row.
+          </p>
+          <label>
             Review filter
             <select
               disabled={busy}
@@ -322,7 +366,7 @@ export function PdfTrackerImport() {
               }}
             >
               <option value="">Choose and apply a type</option>
-              {["Internship", "Co-op", "Graduate"].map((type) => (
+              {["Internship", "Co-op", "Graduate", "Unknown"].map((type) => (
                 <option key={type}>{type}</option>
               ))}
             </select>
@@ -407,6 +451,9 @@ export function PdfTrackerImport() {
                               type={field === "applied_on" ? "date" : "text"}
                               maxLength={field === "company" ? 120 : 160}
                               value={row[field]}
+                              placeholder={
+                                field === "applied_on" ? "Unknown" : undefined
+                              }
                               onChange={(event) =>
                                 update(row.id, {
                                   [field]: event.target.value,
@@ -455,9 +502,11 @@ export function PdfTrackerImport() {
                             }
                           >
                             <option value="">Unknown / Not specified</option>
-                            {["Internship", "Co-op", "Graduate"].map((type) => (
-                              <option key={type}>{type}</option>
-                            ))}
+                            {["Internship", "Co-op", "Graduate", "Unknown"].map(
+                              (type) => (
+                                <option key={type}>{type}</option>
+                              ),
+                            )}
                           </select>
                         </td>
                         <td>
@@ -555,7 +604,12 @@ export function PdfTrackerImport() {
               </table>
             </div>
           </fieldset>
-          <Button disabled={busy || !ready.length} onClick={() => void save()}>
+          <Button
+            disabled={
+              busy || !ready.length || (!skipIncomplete && skipped.length > 0)
+            }
+            onClick={() => void save()}
+          >
             Import Selected
           </Button>
         </>
@@ -568,6 +622,12 @@ export function PdfTrackerImport() {
       {error && (
         <p role="alert" className="error">
           {error}
+        </p>
+      )}
+      {summary && (
+        <p role="status">
+          Imported {summary.imported} · Skipped {summary.skipped} · Duplicates{" "}
+          {summary.duplicates} · Failed {summary.failed}
         </p>
       )}
       {messages.length > 0 && (

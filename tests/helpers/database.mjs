@@ -13,6 +13,7 @@ export async function createTestDatabase() {
     "202611110001_initial.sql",
     "002_application_tracking.sql",
     "003_bulk_pdf_import.sql",
+    "004_incomplete_import_rows.sql",
   ])
     await db.exec(
       await readFile(

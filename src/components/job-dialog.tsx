@@ -95,6 +95,7 @@ export function JobDialog({
             <option>Internship</option>
             <option>Co-op</option>
             <option>Graduate</option>
+            <option>Unknown</option>
           </select>
         </label>
         <label>

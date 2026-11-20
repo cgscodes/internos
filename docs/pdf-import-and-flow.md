@@ -2,6 +2,16 @@
 
 Implemented in the existing Next.js app. No deployment or production SQL execution was performed. Existing migrations, authentication checks, native sources, and Capacitor plugins are preserved. No IPA was built or exported.
 
+## Final incomplete-row repair
+
+Apply `004_incomplete_import_rows.sql` after `003` before deploying this repair. It adds the explicit `Unknown` job type to the existing job/application checks, lets the import RPC accept null dates, and prevents the existing date trigger from filling unknown Handshake dates with today. It preserves caller privileges, ownership checks, RLS, receipts, and history triggers. No existing records are rewritten. The sections below describe earlier implementation stages and their original validation rules.
+
+Blank application dates now persist as SQL null; malformed nonblank dates still require correction. Unspecified employment type persists as `Unknown`, never an inferred Internship. Unknown source statuses (including Closed and Reviewed) remain unchanged in `source_status`; they require a user-selected InternOS status and explicit review confirmation before creation. Otherwise the row remains in the current review draft, which is held in memory until the dialog closes.
+
+**Skip Incomplete Rows** is enabled by default. Confirmed valid selections import independently, while incomplete/unconfirmed selections remain editable. Turning it off requires resolving or deselecting those rows. Each run summarizes imported, skipped, duplicates, and failed; failures remain retryable. On a lost response, failed means no confirmed outcome, and receipts make retry safe. No PDF extraction or Capacitor changes are included.
+
+Local database and browser regressions cover Row 24, null dates, Unknown type, unmapped status confirmation, partial batches, failures, and duplicate retries. Live verification requires the existing signed-in test credentials; local PGlite and mock-backed browser tests do not verify live Supabase.
+
 ## Row alignment and bulk eligibility repair
 
 This follow-up changes only `src/lib/pdf/tracker.ts`, `src/components/pdf-tracker-import.tsx`, `tests/bulk-import.test.ts`, `tests/e2e/import-flow.spec.ts`, `tests/helpers/job-pdf.mjs`, and this guide. It adds no migration, authentication/OAuth changes, native changes, dependencies, or IPA build. Deploy the updated web app through the existing Vercel workflow; migration `003` must already be installed from the original feature, but no new SQL or redirect configuration is needed for this repair.

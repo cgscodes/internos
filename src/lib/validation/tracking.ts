@@ -17,7 +17,7 @@ const jobFields = {
   company: z.string().trim().min(1, "Company is required").max(120),
   title: z.string().trim().min(1, "Role is required").max(160),
   location: z.string().trim().max(160),
-  type: z.enum(["Internship", "Co-op", "Graduate"]),
+  type: z.enum(["Internship", "Co-op", "Graduate", "Unknown"]),
   source: z.string().trim().max(120),
   url: z.union([
     z.literal(""),

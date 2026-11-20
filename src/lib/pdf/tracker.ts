@@ -3,7 +3,7 @@ import { dateInput, statuses } from "../validation/tracking.ts";
 import type { Application } from "../models.ts";
 import type { PdfPage, PdfTextItem } from "./extract.ts";
 
-const jobTypes = ["Internship", "Co-op", "Graduate"] as const;
+const jobTypes = ["Internship", "Co-op", "Graduate", "Unknown"] as const;
 const identityFields = {
   id: z.uuid(),
   import_key: z.string().regex(/^[a-f0-9]{64}:\d+:\d+$/),
@@ -58,22 +58,27 @@ export const finalizedImportRowSchema = z.object({
     .max(160, "Location must be at most 160 characters."),
   applied_on: z
     .string()
-    .trim()
-    .transform((value) => parseAppliedDate(value) || value)
+    .nullable()
+    .transform((value) => value?.trim() || null)
+    .transform((value) =>
+      value === null ? null : parseAppliedDate(value) || value,
+    )
     .pipe(
-      z.iso.date({
-        error:
-          "Enter a valid application date; missing dates stay unknown until corrected.",
-      }),
+      z.iso
+        .date({
+          error: "Enter a valid application date or leave it blank if unknown.",
+        })
+        .nullable(),
     ),
   source_status: z.string().trim().max(120),
   status: z.enum(statuses, {
     error: "Status needs confirmation. Choose an InternOS status.",
   }),
-  type: z.enum(jobTypes, {
-    error:
-      "Job type needs confirmation. Choose Internship, Co-op, or Graduate.",
-  }),
+  type: z.preprocess(
+    (value) =>
+      value === "" || value === null || value === undefined ? "Unknown" : value,
+    z.enum(jobTypes, { error: "Choose a supported job type or Unknown." }),
+  ),
   reviewed: z.literal(true, {
     error: "Confirm this row after reviewing its fields and status mapping.",
   }),

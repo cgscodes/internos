@@ -212,7 +212,7 @@ test("bulk tracker review imports corrected rows, refreshes analytics and safely
     })
     .click();
   await expect(
-    page.getByRole("status").filter({ hasText: "duplicate" }),
+    page.getByRole("status").filter({ hasText: /^Imported 0/ }),
   ).toBeVisible();
   expect(
     (await (await page.request.get("/api/workspace")).json()).applications,
@@ -281,9 +281,11 @@ test("bulk import API enforces authentication, review validation, origin and per
     "error",
   ]);
   expect(result.results[2].error).toContain("Confirm this row");
-  expect(result.results[3].error).toContain("Job type needs confirmation");
+  expect(result.results[3].error).not.toContain("Job type needs confirmation");
   expect(result.results[3].error).toContain("Status needs confirmation");
-  expect(result.results[3].error).toContain("Enter a valid application date");
+  expect(result.results[3].error).not.toContain(
+    "Enter a valid application date",
+  );
   expect(result.results[3].row).toBe(3);
   expect(result.results[3].error).not.toContain("Invalid option");
   const workspace = await (await page.request.get("/api/workspace")).json();
@@ -342,8 +344,8 @@ test("bulk drafts normalize short dates, explain missing fields, and preserve ed
   await expect(
     page.getByLabel("Confirm review row 1", { exact: true }),
   ).not.toBeChecked();
-  await expect(dialog).toContainText("Row 1: Job type needs confirmation");
-  await expect(dialog).toContainText("Row 2: Enter a valid application date");
+  await expect(dialog).not.toContainText("Job type needs confirmation");
+  await expect(dialog).not.toContainText("Enter a valid application date");
   await expect(dialog).toContainText("Row 2: Status needs confirmation");
   await expect(dialog).not.toContainText("Invalid option");
   await expect(dialog).not.toContainText("expected true");
@@ -475,14 +477,14 @@ test("offset multipage PDFs import truncated eligible rows while invalid rows re
       .check();
     await expect(
       page.getByRole("status").filter({ hasText: "Detected" }),
-    ).toContainText("Ready to import 5");
+    ).toContainText("Ready to import 6");
     await page
       .getByRole("combobox", { name: "Review filter", exact: true })
       .selectOption("attention");
-    await expect(page.locator(".bulk-review-table tbody tr")).toHaveCount(5);
+    await expect(page.locator(".bulk-review-table tbody tr")).toHaveCount(4);
     await expect(
       page.getByLabel("applied_on row 7", { exact: true }),
-    ).toHaveValue("");
+    ).toHaveCount(0);
     await expect(
       page.getByLabel("applied_on row 1", { exact: true }),
     ).toHaveCount(0);
@@ -501,17 +503,17 @@ test("offset multipage PDFs import truncated eligible rows while invalid rows re
     await expect(
       page
         .getByRole("status")
-        .filter({ hasText: repeat ? "duplicate" : "created" }),
+        .filter({ hasText: repeat ? /^Imported 0/ : "created" }),
     ).toBeVisible();
     await expect(
       page.getByRole("status").filter({ hasText: "not imported" }),
-    ).toContainText("Row 7");
+    ).toContainText("Row 6");
     await expect(
       page.getByRole("progressbar", { name: "Application import progress" }),
-    ).toHaveAttribute("value", "5");
+    ).toHaveAttribute("value", "6");
     const workspace = await (await page.request.get("/api/workspace")).json();
-    expect(workspace.applications).toHaveLength(5);
-    expect(workspace.events).toHaveLength(5);
+    expect(workspace.applications).toHaveLength(6);
+    expect(workspace.events).toHaveLength(6);
     const first = workspace.applications.find(
       (app: { company: string }) => app.company === "Example Labs...",
     );
@@ -527,12 +529,12 @@ test("offset multipage PDFs import truncated eligible rows while invalid rows re
     ).toBeTruthy();
     await expect(
       page.getByLabel("Include row 7", { exact: true }),
-    ).toBeChecked();
+    ).not.toBeChecked();
   }
   await page.getByRole("button", { name: "Close dialog", exact: true }).click();
   await page.goto("/");
   await expect(page.locator(".application-flow")).toContainText(
-    "5 applications",
+    "6 applications",
   );
   await page.getByLabel("Analytics view").selectOption("transitions");
   await expect(page.locator(".application-flow")).toContainText(
@@ -607,4 +609,67 @@ test("bulk progress retains committed rows when a later chunk fails and retry im
   expect(
     (await (await page.request.get("/api/workspace")).json()).applications,
   ).toHaveLength(21);
+});
+
+test("Row 24 can be skipped independently, then explicitly confirmed with an unknown date and type", async ({
+  page,
+}) => {
+  const { trackerPdf } = await import("../helpers/job-pdf.mjs");
+  await page.goto("/discover");
+  await page.getByRole("button", { name: "Import PDF", exact: true }).click();
+  await page.getByLabel("Import mode").selectOption("tracker");
+  const rows = Array.from({ length: 24 }, (_, index) => [
+    `Final Studio ${index + 1}`,
+    "Research",
+    index === 23 ? "" : "11/10/26",
+    "Remote",
+    index === 23 ? "Closed" : "Applied",
+  ]);
+  await page.getByLabel("Application tracker PDFs").setInputFiles({
+    name: "final.pdf",
+    mimeType: "application/pdf",
+    buffer: trackerPdf(
+      [rows.slice(0, 8), rows.slice(8, 16), rows.slice(16)],
+      true,
+    ),
+  });
+  await expect(
+    page.getByRole("status").filter({ hasText: "Detected" }),
+  ).toContainText("Detected 24");
+  await page
+    .getByLabel("Confirm selected eligible rows", { exact: true })
+    .check();
+  await page.getByLabel("Skip Incomplete Rows", { exact: true }).uncheck();
+  const submit = page.getByRole("button", {
+    name: "Import Selected",
+    exact: true,
+  });
+  await expect(submit).toBeDisabled();
+  await page.getByLabel("Skip Incomplete Rows", { exact: true }).check();
+  await submit.click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Imported 23" }),
+  ).toHaveText("Imported 23 · Skipped 1 · Duplicates 0 · Failed 0");
+  await expect(page.getByLabel("Status row 24", { exact: true })).toHaveValue(
+    "",
+  );
+  await expect(
+    page.getByLabel("Include row 24", { exact: true }),
+  ).toBeChecked();
+  await page.getByLabel("Status row 24", { exact: true }).selectOption("Saved");
+  await page.getByLabel("Confirm review row 24", { exact: true }).check();
+  await submit.click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Imported 1" }),
+  ).toHaveText("Imported 1 · Skipped 0 · Duplicates 0 · Failed 0");
+  const workspace = await (await page.request.get("/api/workspace")).json();
+  expect(workspace.applications).toHaveLength(24);
+  const last = workspace.applications.find(
+    (app: { company: string }) => app.company === "Final Studio 24",
+  );
+  expect(last.applied_on).toBe(""); // Workspace represents the persisted SQL null as an empty input.
+  expect(last.type).toBe("Unknown");
+  expect(last.source_status).toBe("Closed");
+  expect(last.status).toBe("Saved");
+  expect(workspace.events).toHaveLength(24);
 });

@@ -365,7 +365,7 @@ test("two-digit Handshake dates normalize to ISO without accepting impossible da
   assert.equal(rows[0].source_status, "aPpLiEd");
 });
 
-test("extracted rows and editable drafts allow uncertainty, while final records require explicit type, status, date and boolean review", async () => {
+test("extracted rows and editable drafts allow uncertainty, while final records require explicit status and boolean review", async () => {
   assert.ok(extractedPdfRowSchema.safeParse({}).success);
   const row = (await extracted())[0];
   const draft = importDraftSchema.parse({
@@ -386,7 +386,7 @@ test("extracted rows and editable drafts allow uncertainty, while final records 
   if (!invalid.success) {
     assert.deepEqual(
       invalid.error.issues.map((issue) => issue.path[0]),
-      ["applied_on", "status", "type", "reviewed"],
+      ["status", "reviewed"],
     );
     assert.ok(
       importValidationMessages(invalid.error.issues, 12).every((message) =>
@@ -395,7 +395,7 @@ test("extracted rows and editable drafts allow uncertainty, while final records 
     );
     assert.ok(
       importValidationMessages(invalid.error.issues, 12).some((message) =>
-        message.includes("Job type needs confirmation"),
+        message.includes("Status needs confirmation"),
       ),
     );
   }
@@ -510,8 +510,8 @@ test("truncation warnings never block selected eligible applications and invalid
     reviewed: true,
   }));
   const { ready, skipped } = prepareSelectedImports(drafts);
-  assert.equal(ready.length, 4);
-  assert.equal(skipped.length, 5);
+  assert.equal(ready.length, 5);
+  assert.equal(skipped.length, 4);
   for (const { row, data } of ready) {
     const review = reviewImportRow(row);
     assert.equal(review.eligible, true);
@@ -528,7 +528,9 @@ test("truncation warnings never block selected eligible applications and invalid
   );
   assert.match(skippedByIndex.get(4)!, /Status needs confirmation/);
   assert.match(skippedByIndex.get(5)!, /Status needs confirmation/);
-  assert.match(skippedByIndex.get(6)!, /valid application date/);
+  assert.ok(
+    ready.some((item) => item.index === 6 && item.data.applied_on === null),
+  );
   assert.match(skippedByIndex.get(7)!, /Company is required/);
   assert.match(skippedByIndex.get(8)!, /Job title is required/);
   assert.equal(drafts[6].selected, true);
@@ -579,11 +581,16 @@ test("truncated aligned rows persist through existing transactions, reimport ide
         assert.equal(result.outcome, repeat ? "duplicate" : "created");
       }
     const stored = (
-      await db.query("select *,applied_on::text from public.applications")
+      await db.query<{ applied_on: string | null }>(
+        "select *,applied_on::text from public.applications",
+      )
     ).rows.map((row) =>
-      applicationSchema.parse(JSON.parse(JSON.stringify(row))),
+      applicationSchema.parse({
+        ...JSON.parse(JSON.stringify(row)),
+        applied_on: row.applied_on || "",
+      }),
     );
-    assert.equal(stored.length, 4);
+    assert.equal(stored.length, 5);
     assert.equal(
       stored.find((row) => row.company === "Example Labs...")?.applied_on,
       "2026-11-10",
@@ -593,15 +600,15 @@ test("truncated aligned rows persist through existing transactions, reimport ide
       "Hired",
     );
     const flow = currentApplicationFlow(stored, 3650, "2026-11-17");
-    assert.equal(flow.total, 4);
+    assert.equal(flow.total, 5);
     assert.equal(
       flow.rows.reduce((sum, row) => sum + row.count, 0),
-      4,
+      5,
     );
     const events = (
       await db.query<Activity>("select * from public.application_events")
     ).rows;
-    assert.equal(events.length, 4);
+    assert.equal(events.length, 5);
     assert.equal(applicationFlow(events).total, 0);
   } finally {
     await db.close();
@@ -653,4 +660,119 @@ test("a dated table row missing both identity fields is kept invalid without shi
       error.includes("Job title is required"),
     ),
   );
+});
+
+test("Row 24 stays a draft until status confirmation, then persists a null date and Unknown type without invented history", async () => {
+  const row24 = importDraftSchema.parse({
+    id: crypto.randomUUID(),
+    import_key: `${hash}:2:24`,
+    job_id: null,
+    page: 2,
+    company: "Row 24 Studio",
+    title: "Research role",
+    location: "Remote",
+    applied_on: "",
+    type: "",
+    source_status: "Closed",
+    status: "",
+    reviewed: true,
+  });
+  const valid = {
+    ...row24,
+    id: crypto.randomUUID(),
+    import_key: `${hash}:1:1`,
+    company: "Valid Studio",
+    status: "Applied" as const,
+  };
+  const batch = prepareSelectedImports([valid, row24]);
+  assert.equal(batch.ready.length, 1);
+  assert.equal(batch.skipped.length, 1);
+  assert.deepEqual(batch.skipped[0].errors, [
+    "Status needs confirmation. Choose an InternOS status.",
+  ]);
+  assert.equal(row24.source_status, "Closed");
+  for (const applied_on of ["yesterday", "2026-02-30"])
+    assert.equal(
+      finalizedImportRowSchema.safeParse({ ...valid, applied_on }).success,
+      false,
+    );
+  assert.equal(
+    finalizedImportRowSchema.safeParse({ ...valid, type: "Full-time" }).success,
+    false,
+  );
+  const db = await createTestDatabase();
+  try {
+    await db.query("insert into auth.users(id) values($1)", [alice]);
+    await db.exec(
+      `set role authenticated;select set_config('request.jwt.claim.sub','${alice}',false)`,
+    );
+    const save = async (data: unknown) =>
+      (
+        await db.query<{ result: { outcome: string } }>(
+          "select public.import_tracking_application($1::jsonb) as result",
+          [JSON.stringify(data)],
+        )
+      ).rows[0].result;
+    assert.equal((await save(batch.ready[0].data)).outcome, "created");
+    await assert.rejects(
+      () => save({ ...batch.ready[0].data, status: null }),
+      /Status required/,
+    );
+    for (const source_status of ["Closed", "Reviewed"]) {
+      const confirmed = finalizedImportRowSchema.parse({
+        ...row24,
+        source_status,
+        import_key: `${hash}:2:${source_status === "Closed" ? 24 : 25}`,
+        company: source_status,
+        status: "Saved",
+      });
+      assert.equal(confirmed.applied_on, null);
+      assert.equal(confirmed.type, "Unknown");
+      assert.equal((await save(confirmed)).outcome, "created");
+      await db.query(
+        "update public.applications set status='Withdrawn' where company=$1",
+        [source_status],
+      );
+      assert.equal(
+        (
+          await save({
+            ...confirmed,
+            import_key: `${"b".repeat(64)}:2:${source_status === "Closed" ? 24 : 25}`,
+          })
+        ).outcome,
+        "duplicate",
+      );
+    }
+    const stored = (
+      await db.query<{
+        applied_on: null;
+        type: string;
+        source_status: string;
+        job_type: string;
+      }>(
+        "select a.applied_on,a.type,a.source_status,j.type as job_type from public.applications a join public.jobs j on j.id=a.job_id",
+      )
+    ).rows;
+    assert.equal(stored.length, 3);
+    for (const row of stored) {
+      assert.equal(row.applied_on, null);
+      assert.equal(row.type, "Unknown");
+      assert.equal(row.job_type, "Unknown");
+    }
+    assert.deepEqual(stored.map((row) => row.source_status).sort(), [
+      "Closed",
+      "Closed",
+      "Reviewed",
+    ]);
+    assert.equal(
+      (
+        await db.query(
+          "select * from public.application_events where from_status is null",
+        )
+      ).rows.length,
+      3,
+    );
+  } finally {
+    await db.close();
+  }
 });
