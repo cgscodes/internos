@@ -27,7 +27,13 @@ export default defineConfig({
   projects: [
     {
       name: "safari",
-      testMatch: ["design.spec.ts", "import-flow.spec.ts", "ai-match.spec.ts"],
+      testMatch: [
+        "design.spec.ts",
+        "import-flow.spec.ts",
+        "ai-match.spec.ts",
+        "native-auth.spec.ts",
+        "auth.spec.ts",
+      ],
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 1440, height: 1000 },
@@ -35,7 +41,13 @@ export default defineConfig({
     },
     {
       name: "webkit-iphone",
-      testMatch: ["design.spec.ts", "import-flow.spec.ts", "ai-match.spec.ts"],
+      testMatch: [
+        "design.spec.ts",
+        "import-flow.spec.ts",
+        "ai-match.spec.ts",
+        "native-auth.spec.ts",
+        "auth.spec.ts",
+      ],
       use: { ...devices["iPhone 13"] },
     },
     {

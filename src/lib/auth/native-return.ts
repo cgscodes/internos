@@ -5,7 +5,16 @@ import { NATIVE_CALLBACK, parseNativeCallback } from "./native-contract.ts";
  * This public Safari endpoint cannot authenticate a flow; only the app-side POST can.
  */
 export function nativeReturnLinks(search: string) {
-  const incoming = `${NATIVE_CALLBACK}${search}`;
+  const params = new URLSearchParams(search);
+  if (params.has("target")) {
+    if (
+      params.getAll("target").length !== 1 ||
+      params.get("target") !== "livecontainer"
+    )
+      throw new Error("Invalid return target");
+    params.delete("target");
+  }
+  const incoming = `${NATIVE_CALLBACK}?${params}`;
   const parsed = parseNativeCallback(incoming);
   const callback = new URL(NATIVE_CALLBACK);
   callback.searchParams.set("state", parsed.state);

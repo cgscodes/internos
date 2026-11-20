@@ -349,3 +349,87 @@ test("an expired native flow or missing WebView PKCE verifier cannot create a se
     ).toEqual({ authenticated: false });
   }
 });
+
+test("main LiveContainer forwarding establishes a persistent session and rejects a replayed envelope", async ({
+  page,
+}) => {
+  await nativeBridge(page);
+  await page.goto("/login");
+  await page
+    .getByRole("button", { name: "Continue with Google", exact: true })
+    .click();
+  const auth = await openedAuthorization(page);
+  const redirect = new URL(new URL(auth).searchParams.get("redirect_to")!);
+  expect(redirect.pathname).toBe("/auth/native/return");
+  expect(redirect.searchParams.get("target")).toBe("livecontainer");
+  const browser = await (await import("@playwright/test")).request.newContext();
+  let forwarded: string;
+  try {
+    const response = await browser.get(auth, { maxRedirects: 0 });
+    const relay = await browser.get(response.headers().location);
+    const html = await relay.text();
+    expect(relay.headers()["content-security-policy"]).toContain(
+      "default-src 'none'",
+    );
+    const match = html.match(/href="(livecontainer:\/\/open-url[^\"]+)"/);
+    expect(match).toBeTruthy();
+    forwarded = match![1].replaceAll("&amp;", "&");
+    expect((await browser.storageState()).cookies).toHaveLength(0);
+  } finally {
+    await browser.dispose();
+  }
+  await page.evaluate(
+    (url) => Reflect.get(window, "__nativeTest").emit("appUrlOpen", { url }),
+    forwarded!,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Keep moving forward, Alex." }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Keep moving forward, Alex." }),
+  ).toBeVisible();
+  const callback = new URL(
+    Buffer.from(
+      new URL(forwarded!).searchParams.get("url")!,
+      "base64",
+    ).toString(),
+  );
+  const replay = await page.request.post("/auth/native/callback", {
+    headers: { Origin: origin },
+    data: {
+      state: callback.searchParams.get("state"),
+      code: callback.searchParams.get("code"),
+    },
+  });
+  expect(replay.status()).toBe(400);
+});
+
+test("a stale direct-callback authorization URL is rejected before Safari opens", async ({
+  page,
+}) => {
+  await nativeBridge(page);
+  await page.goto("/login");
+  const invalid = new URL("http://127.0.0.1:54329/auth/v1/authorize");
+  invalid.searchParams.set("provider", "google");
+  invalid.searchParams.set(
+    "redirect_to",
+    `com.internos.mobile://auth/callback?state=${"a".repeat(64)}`,
+  );
+  invalid.searchParams.set("code_challenge", "b".repeat(43));
+  invalid.searchParams.set("code_challenge_method", "s256");
+  await page.route("**/auth/native/start", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ json: { url: invalid.href } })
+      : route.continue(),
+  );
+  await page
+    .getByRole("button", { name: "Continue with Google", exact: true })
+    .click();
+  await expect(page.locator(".google-sign-in .error")).toContainText(
+    "return destination is invalid",
+  );
+  expect(
+    await page.evaluate(() => Reflect.get(window, "__nativeTest").opened),
+  ).toBe("");
+});

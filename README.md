@@ -6,6 +6,8 @@ See [the UI redesign report and release/IPA handoff](docs/ui-redesign.md) for de
 
 Phase 4.1 adds Gemini resume matching in saved job details. See [the matching implementation and deployment guide](docs/gemini-matching.md) for changed files, scoring, security, migration `005`, `GEMINI_API_KEY`, tests, and live verification steps. Apply migration `004` before `005` if it is still pending. Matching currently requires a selectable-text PDF resume.
 
+For the current LiveContainer OAuth routing repair and rebuilt IPA (build 2), see [the repair, deployment, and physical installation handoff](docs/livecontainer-oauth.md). Vercel redeployment and the documented Supabase redirect allowlist are required; physical-device authentication remains unverified.
+
 ## Start the existing application
 
 Requires Node.js 22.13+ and npm. Keep your existing `.env.local` intact.

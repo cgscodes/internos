@@ -106,20 +106,26 @@ export function GoogleSignInButton({
         {pending ? <LoaderCircle size={17} /> : <ArrowRight size={17} />}
       </Button>
       {pending && isNativeIOS() && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            void native.current
-              ?.then((controller) => controller.cancel())
-              .catch(() => {
-                setPending(false);
-                setError("Sign-in was cancelled. Please try again.");
-              });
-          }}
-        >
-          Cancel sign-in
-        </Button>
+        <>
+          <p>
+            After Google, choose Open in LiveContainer on the return page. For a
+            directly installed app, expand Using another installation.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void native.current
+                ?.then((controller) => controller.cancel())
+                .catch(() => {
+                  setPending(false);
+                  setError("Sign-in was cancelled. Please try again.");
+                });
+            }}
+          >
+            Cancel sign-in
+          </Button>
+        </>
       )}
       {error && (
         <p role="alert" className="error">

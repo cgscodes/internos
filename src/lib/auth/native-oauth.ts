@@ -8,6 +8,7 @@ import {
   AUTH_REQUEST_TIMEOUT_MS,
   NATIVE_FLOW_TTL_MS,
   parseNativeCallback,
+  validateNativeAuthorization,
 } from "./native-contract";
 type State = { pending: boolean; error: string };
 export function isNativeIOS() {
@@ -256,17 +257,13 @@ export async function createNativeOAuth(
           body: JSON.stringify({ next: safeNext(next) }),
         });
         if (disposed || current !== generation) return;
-        const authorization = new URL(started.url);
         const config = getSupabaseConfig();
-        if (
-          !config ||
-          authorization.origin !== new URL(config.url).origin ||
-          authorization.pathname !== "/auth/v1/authorize" ||
-          authorization.searchParams.get("provider") !== "google"
-        )
-          throw new Error(
-            "The sign-in destination was invalid. Please try again.",
-          );
+        if (!config) throw new Error("Sign-in is not configured.");
+        const authorization = validateNativeAuthorization(
+          started.url,
+          config.url,
+          window.location.origin,
+        );
         expiry =
           typeof started.expiresAt === "number" ? started.expiresAt : expiry;
         phase = "waiting";

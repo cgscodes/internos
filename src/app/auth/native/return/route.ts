@@ -18,10 +18,11 @@ export async function GET(request: Request) {
   try {
     const links = nativeReturnLinks(new URL(request.url).search);
     content = `<h1>${links.declined ? "Sign-in was declined" : "Return to InternOS"}</h1>
-    <p>Choose where you started sign-in. Keep InternOS open in that same container.</p>
+    <p>For InternOS inside the main LiveContainer, tap Open in LiveContainer below. Safari cannot open a guest app’s own URL scheme directly.</p>
     <a href="${escape(links.containers[0])}">Open in LiveContainer</a>
-    <details><summary>Using a secondary LiveContainer?</summary><a href="${escape(links.containers[1])}">Open in LiveContainer 2</a><a href="${escape(links.containers[2])}">Open in LiveContainer 3</a></details>
-    <a href="${escape(links.app)}">Open directly installed InternOS</a>
+    <p>Keep the original InternOS guest open. If LiveContainer asks which app to use, select InternOS in the same data container where sign-in started.</p>
+    <details><summary>Using another installation?</summary><a href="${escape(links.containers[1])}">Open in LiveContainer 2</a><a href="${escape(links.containers[2])}">Open in LiveContainer 3</a>
+    <a href="${escape(links.app)}">Open directly installed InternOS</a></details>
     <p>If nothing opens, return to InternOS and cancel sign-in, then try again. This return link expires with your sign-in attempt after three minutes. Completing sign-in requires the original app session.</p>
 `;
   } catch {

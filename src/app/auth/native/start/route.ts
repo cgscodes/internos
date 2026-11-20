@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     const flow = newNativeFlow(next);
     const callback = new URL("/auth/native/return", appOrigin(request));
     callback.searchParams.set("state", flow.state);
+    callback.searchParams.set("target", "livecontainer");
     const client = await createClient({ nativePkce: true });
     const { data, error } = await client.auth.signInWithOAuth({
       provider: "google",
